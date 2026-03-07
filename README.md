@@ -33,147 +33,105 @@ This ensures **true data ownership and privacy**.
 
 ## 🔑 Secure Password Vault
 Safely store and manage:
-
 - website logins
 - API keys
 - private credentials
 - personal secrets
 
-All data is stored in a **secure encrypted vault**.
+All data is stored in a **secure encrypted vault** using **AES-256-GCM**. Master password never leaves your device (**Zero-Knowledge**).
 
 ---
 
-## 🪙 Seed Phrase Storage
-Store **crypto wallet seed phrases** and recovery keys securely.
-
-Perfect for users managing:
-
-- crypto wallets
-- blockchain identities
-- recovery phrases
-- private keys
+## 🛡️ Hardened 2FA
+Built-in support for TOTP (Google Authenticator, Microsoft Authenticator, Aegis, etc.).
+- Mandatory 2FA setup during registration.
+- OTP-gated critical actions.
+- Replay attack protection.
 
 ---
 
-## 🔢 PIN Code Protection
-Access the app using a **secure PIN code lock**.
-
-This protects your vault even if the device is compromised.
-
----
-
-## 📜 Password History
-Every password change is stored in **history** so you can:
-
-- view previous passwords
-- track password updates
-- recover old credentials
-
----
-
-## 🔔 Notifications
-Receive **security notifications** and reminders:
-
-- password change reminders
-- security alerts
-- vault updates
-
----
-
-# 🎨 Beautiful Custom Themes
-
-Zero Password Manager includes **3 unique UI themes** designed for modern users.
-
-### 🌃 Cyberpunk Theme
-A futuristic **neon cyberpunk interface** with glowing accents and dark UI elements.
-
-Perfect for users who love **tech aesthetics and hacker-style visuals**.
-
----
-
-### 🪟 Glassmorphism Theme
-A **modern glass-style interface** with blur effects and transparent UI components.
-
-Clean, elegant, and minimal.
-
----
-
-### 🌑 Midnight Dark Theme
-A **deep dark interface** optimized for:
-
-- night usage
-- OLED screens
-- minimal eye strain
+## 🎨 Beautiful Custom Themes
+Zero Password Manager includes **3 unique UI themes**:
+- **Cyberpunk**: A futuristic neon interface.
+- **Glassmorphism**: A modern glass-style interface with blur effects.
+- **Midnight Dark**: Optimized for OLED screens and night usage.
 
 ---
 
 # 📱 Built With Flutter
-
 The application is built using **Flutter**, making it fast and cross-platform.
-
-Supported platforms:
-
-- Android
-- iOS
-- Web
-- Desktop (Windows / macOS / Linux)
+Supported platforms: Android, iOS, Web, Desktop.
 
 ---
 
 # 🛡 Security Philosophy
-
 Zero Password Manager follows a **Zero Cloud Security Model**.
-
-**Your secrets should never live in someone else's infrastructure.**
-
-That means:
-
-- No external cloud services
-- No analytics tracking
-- No third-party data access
-- No remote password storage
-
-Everything stays **under your control**.
+Your secrets should never live in someone else's infrastructure.
+- No external cloud services.
+- No analytics tracking.
+- No third-party data access.
+- Everything stays **under your control**.
 
 ---
 
 # ⚙️ Tech Stack
-
-- **Flutter**
-- **Dart**
-- **Secure local storage**
-- **Self-hosted server**
+- **Flutter & Dart**
+- **FastAPI & Python**
+- **SQLAlchemy** (Local SQLite)
+- **Argon2id & AES-256-GCM**
 
 ---
 
-# 📦 Installation
+# 📦 Local Deployment (No Cloud Needed)
 
-Clone the repository:
+Zero Password Manager is designed to be self-hosted in your own local environment.
 
-```bash
-git clone https://github.com/SoulNaturalist/zero_password_manager/
-```
+## 🐍 1. Backend Setup (FastAPI)
+The server handles authentication, audit logs, and stores encrypted blobs.
 
+1.  **Navigate to the server directory**:
+    ```bash
+    cd server
+    ```
+2.  **Install dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
+3.  **Configure Environment**:
+    Copy `env.example` to `.env` and set your `JWT_SECRET_KEY`.
+4.  **Launch the Server**:
+    ```bash
+    python -m uvicorn main:app --host 0.0.0.0 --port 3000
+    ```
+    *The API will be available at `http://localhost:3000`.*
+
+---
+
+## 📱 2. Flutter App Setup
+Ensure you have the Flutter SDK installed.
+
+1.  **Install Dependencies**:
+    ```bash
+    flutter pub get
+    ```
+2.  **Configuration**:
+    Create a `.env` file in the root directory (based on `env.example`). Set `API_BASE_URL` to point to your server's IP.
+3.  **Run the App**:
+    ```bash
+    flutter run
+    ```
+
+---
 
 # 📜 License
+This project is licensed under the **PolyForm Noncommercial License 1.0.0**.
 
-This project is licensed under the **PolyForm Noncommercial License 1.0.0** — see the [LICENSE](LICENSE) file for details.
-
-### ✅ You can:
-- Use, study, and modify the software
-- Distribute original or modified versions
-- Use for personal, research, educational, or hobby projects
-
-### ❌ You cannot:
-- Use this software for commercial purposes
-- Sell, monetize, or include in paid products/services
-- Use in any revenue-generating activity
-
-### ℹ️ You must:
-- Include a copy of this license with any distribution
-- Preserve the following notice in all copies:
-  > **Required Notice:** Copyright © 2025 SoulNaturalist (https://github.com/SoulNaturalist/zero_password_manager)
+✅ **You can**: Use, study, modify, and distribute for personal, research, or hobby projects.
+❌ **You cannot**: Use for commercial purposes or revenue-generating activities.
 
 ---
 
 > 🔐 **Zero Password Manager** — Your data, your server, your rules.
+
+---
+[Русская версия README](README_RU.md)
