@@ -107,7 +107,7 @@ The server handles authentication, audit logs, and stores encrypted blobs.
 
 ---
 
-## 📱 2. Flutter App Setup
+### 📱 2. Flutter App Setup
 Ensure you have the Flutter SDK installed.
 
 1.  **Install Dependencies**:
@@ -120,6 +120,36 @@ Ensure you have the Flutter SDK installed.
     ```bash
     flutter run
     ```
+
+### 📦 3. Mobile Build (Android & iOS)
+
+To build the application for mobile devices:
+
+#### Android
+```bash
+flutter build apk --release
+# Or for Play Store
+flutter build appbundle --release
+```
+
+#### iOS / Apple
+*Note: Requires macOS and Xcode.*
+```bash
+flutter build ios --release
+```
+
+---
+
+# 🤝 Contributing
+I would be very happy to receive help with the development of **Zero Password Manager**! 
+
+If you want to:
+- 🛠 Fix bugs
+- ✨ Add new features
+- 🎨 Improve UI/UX
+- 📝 Improve documentation
+
+Feel free to **fork the repository**, create a branch, and submit a **Pull Request**. Any contribution is valuable!
 
 ---
 
