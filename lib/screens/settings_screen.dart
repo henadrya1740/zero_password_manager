@@ -1,0 +1,1059 @@
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../theme/colors.dart';
+import '../config/app_config.dart';
+import '../utils/biometric_service.dart';
+
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  bool _hasPinCode = false;
+  bool _isLoading = true;
+  bool _hideSeedPhrases = false;
+  bool _biometricEnabled = false;
+  bool _biometricAvailable = false;
+  String _biometricType = 'Биометрическая аутентификация';
+  AppTheme _currentTheme = AppTheme.dark;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkPinCodeStatus();
+    _loadSeedPhraseSettings();
+    _loadBiometricSettings();
+    _loadThemeSettings();
+  }
+
+  Future<void> _checkPinCodeStatus() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pinCode = prefs.getString('pin_code');
+      
+      setState(() {
+        _hasPinCode = pinCode != null;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadSeedPhraseSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hideSeedPhrases = prefs.getBool('hide_seed_phrases') ?? false;
+      
+      setState(() {
+        _hideSeedPhrases = hideSeedPhrases;
+      });
+    } catch (e) {
+      // Игнорируем ошибки при загрузке настроек
+    }
+  }
+
+  Future<void> _changePinCode() async {
+    final result = await Navigator.pushNamed(context, '/setup-pin');
+    if (result == true) {
+      _checkPinCodeStatus();
+    }
+  }
+
+  Future<void> _removePinCode() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.input,
+        title: Text(
+          'Удалить PIN-код?',
+          style: TextStyle(color: AppColors.text),
+        ),
+        content: const Text(
+          'Вы уверены, что хотите удалить PIN-код? После этого для входа в приложение потребуется вводить логин и пароль.',
+          style: TextStyle(color: Colors.grey),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
+            ),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('pin_code');
+        
+        setState(() {
+          _hasPinCode = false;
+        });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.green,
+              content: Text('PIN-код удален'),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.red,
+              content: Text('Ошибка при удалении PIN-кода'),
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.input,
+        title: Text(
+          'Выйти из аккаунта?',
+          style: TextStyle(color: AppColors.text),
+        ),
+        content: const Text(
+          'Вы будете перенаправлены на экран входа.',
+          style: TextStyle(color: Colors.grey),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
+            ),
+            child: const Text('Выйти'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('token');
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(
+            context, 
+            '/login', 
+            (route) => false,
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.red,
+              content: Text('Ошибка при выходе'),
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _updateFavicons() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+
+      final response = await http.post(
+        Uri.parse(AppConfig.updateFaviconsUrl),
+        headers: {
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.green,
+              content: Text('Обновлено фавиконок: ${data['updated'] ?? 0}'),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.red,
+              content: Text('Ошибка при обновлении фавиконок'),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.red,
+            content: Text('Ошибка подключения к серверу'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleSeedPhraseVisibility(bool value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('hide_seed_phrases', value);
+      
+      setState(() {
+        _hideSeedPhrases = value;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.green,
+            content: Text(
+              value 
+                ? 'Записи с seed фразами скрыты' 
+                : 'Записи с seed фразами отображаются',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.red,
+            content: Text('Ошибка при сохранении настроек'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadBiometricSettings() async {
+    try {
+      final biometricAvailable = await BiometricService.isAvailable();
+      final biometricEnabled = await BiometricService.isBiometricEnabled();
+      
+      setState(() {
+        _biometricAvailable = biometricAvailable;
+        _biometricEnabled = biometricEnabled && biometricAvailable;
+        _biometricType = 'Биометрическая аутентификация';
+      });
+    } catch (e) {
+      setState(() {
+        _biometricAvailable = false;
+        _biometricEnabled = false;
+        _biometricType = 'Биометрическая аутентификация';
+      });
+    }
+  }
+
+  Future<void> _toggleBiometric(bool value) async {
+    if (value) {
+      // Включаем биометрическую аутентификацию
+      try {
+        final bool authenticated = await BiometricService.authenticate(
+          reason: 'Подтвердите свою личность для включения биометрической аутентификации',
+        );
+        
+        if (authenticated) {
+          await BiometricService.setBiometricEnabled(true);
+          setState(() {
+            _biometricEnabled = true;
+          });
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                backgroundColor: Colors.green,
+                content: Text('$_biometricType включен'),
+              ),
+            );
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                backgroundColor: Colors.red,
+                content: Text('Аутентификация не пройдена'),
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.red,
+              content: Text('Ошибка при включении биометрической аутентификации'),
+            ),
+          );
+        }
+      }
+    } else {
+      // Выключаем биометрическую аутентификацию
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.input,
+          title: Text(
+            'Отключить $_biometricType?',
+            style: TextStyle(color: AppColors.text),
+          ),
+          content: Text(
+            'Вы уверены, что хотите отключить $_biometricType? После этого для входа потребуется вводить PIN-код или логин и пароль.',
+            style: const TextStyle(color: Colors.grey),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.red,
+              ),
+              child: const Text('Отключить'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed == true) {
+        try {
+          await BiometricService.setBiometricEnabled(false);
+          setState(() {
+            _biometricEnabled = false;
+          });
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                backgroundColor: Colors.green,
+                content: Text('$_biometricType отключен'),
+              ),
+            );
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                backgroundColor: Colors.red,
+                content: Text('Ошибка при отключении биометрической аутентификации'),
+              ),
+            );
+          }
+        }
+      }
+    }
+  }
+
+  Future<void> _showBiometricDiagnostics() async {
+    try {
+      final diagnosticInfo = await BiometricService.getDiagnosticInfo();
+      
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: AppColors.input,
+            title: Text(
+              'Диагностика биометрии',
+              style: TextStyle(color: AppColors.text),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildDiagnosticRow('Статус системы', diagnosticInfo['systemStatus'] ?? 'N/A'),
+                  const SizedBox(height: 12),
+                  _buildDiagnosticRow('Может проверять биометрию', '${diagnosticInfo['canCheckBiometrics'] ?? 'N/A'}'),
+                  _buildDiagnosticRow('Устройство поддерживается', '${diagnosticInfo['isDeviceSupported'] ?? 'N/A'}'),
+                  _buildDiagnosticRow('Включена в настройках', '${diagnosticInfo['isEnabled'] ?? 'N/A'}'),
+                  _buildDiagnosticRow('Всего доступных методов', '${diagnosticInfo['totalAvailableMethods'] ?? 'N/A'}'),
+                  _buildDiagnosticRow('Можно использовать', '${diagnosticInfo['canUseBiometrics'] ?? 'N/A'}'),
+                  
+                  if (diagnosticInfo['biometricDetails'] != null && 
+                      (diagnosticInfo['biometricDetails'] as Map<String, String>).isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Доступные методы:',
+                      style: TextStyle(
+                        color: AppColors.text,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...(diagnosticInfo['biometricDetails'] as Map<String, String>).entries.map(
+                      (entry) => Padding(
+                        padding: const EdgeInsets.only(left: 16, bottom: 4),
+                        child: Text(
+                          '• ${entry.value}',
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  
+                  if (diagnosticInfo['availableBiometrics'] != null && 
+                      (diagnosticInfo['availableBiometrics'] as List).isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Технические названия:',
+                      style: TextStyle(
+                        color: AppColors.text,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...(diagnosticInfo['availableBiometrics'] as List).map(
+                      (biometric) => Padding(
+                        padding: const EdgeInsets.only(left: 16, bottom: 4),
+                        child: Text(
+                          '• $biometric',
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  
+                  if (diagnosticInfo['error'] != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red.withOpacity(0.3)),
+                      ),
+                      child: Text(
+                        'Ошибка: ${diagnosticInfo['error']}',
+                        style: const TextStyle(color: Colors.red, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Закрыть'),
+              ),
+              if (diagnosticInfo['canUseBiometrics'] == true && 
+                  diagnosticInfo['isEnabled'] == false)
+                TextButton(
+                  onPressed: () async {
+                    Navigator.of(context).pop();
+                    await _forceEnableBiometrics();
+                  },
+                  child: const Text('Принудительно включить'),
+                ),
+              TextButton(
+                onPressed: () async {
+                  Navigator.of(context).pop();
+                  await _resetBiometricSettings();
+                },
+                style: TextButton.styleFrom(foregroundColor: Colors.orange),
+                child: const Text('Сбросить настройки'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.red,
+            content: Text('Ошибка при получении диагностики: $e'),
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _buildDiagnosticRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 140,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: AppColors.text,
+                fontWeight: FontWeight.w500,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                color: value == 'true' ? Colors.green : 
+                       value == 'false' ? Colors.red : Colors.grey,
+                fontSize: 12,
+                fontWeight: value == 'true' || value == 'false' ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _forceEnableBiometrics() async {
+    try {
+      final success = await BiometricService.forceEnableBiometrics();
+      
+      if (success) {
+        setState(() {
+          _biometricEnabled = true;
+        });
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.green,
+              content: Text('Биометрическая аутентификация принудительно включена'),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.red,
+              content: Text('Не удалось включить биометрическую аутентификацию'),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.red,
+            content: Text('Ошибка при включении биометрии: $e'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _resetBiometricSettings() async {
+    try {
+      await BiometricService.resetBiometricSettings();
+      
+      setState(() {
+        _biometricEnabled = false;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.orange,
+            content: Text('Настройки биометрии сброшены'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.red,
+            content: Text('Ошибка при сбросе настроек: $e'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadThemeSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final themeIndex = prefs.getInt('app_theme') ?? 0;
+      
+      setState(() {
+        _currentTheme = AppTheme.values[themeIndex];
+      });
+      
+      ThemeManager.setTheme(_currentTheme);
+    } catch (e) {
+      setState(() {
+        _currentTheme = AppTheme.dark;
+      });
+      ThemeManager.setTheme(_currentTheme);
+    }
+  }
+
+  Future<void> _changeTheme() async {
+    final selectedTheme = await showDialog<AppTheme>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.input,
+        title: Text(
+          'Выберите тему',
+          style: TextStyle(color: AppColors.text),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: AppTheme.values.map((theme) {
+            return RadioListTile<AppTheme>(
+              title: Text(
+                ThemeManager.getThemeName(theme),
+                style: TextStyle(color: AppColors.text),
+              ),
+              subtitle: Text(
+                _getThemeDescription(theme),
+                style: const TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+              value: theme,
+              groupValue: _currentTheme,
+              activeColor: AppColors.button,
+              onChanged: (value) => Navigator.of(context).pop(value),
+            );
+          }).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Отмена'),
+          ),
+        ],
+      ),
+    );
+
+    if (selectedTheme != null && selectedTheme != _currentTheme) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt('app_theme', selectedTheme.index);
+        
+        setState(() {
+          _currentTheme = selectedTheme;
+        });
+        
+        ThemeManager.setTheme(selectedTheme);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.green,
+              content: Text('Тема изменена на ${ThemeManager.getThemeName(selectedTheme)}'),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.red,
+              content: Text('Ошибка при сохранении темы'),
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  String _getThemeDescription(AppTheme theme) {
+    switch (theme) {
+      case AppTheme.dark:
+        return 'Классическая темная тема';
+      case AppTheme.cyberpunk:
+        return 'Неоновые цвета и эффекты свечения';
+      case AppTheme.glassmorphism:
+        return 'Полупрозрачные элементы с размытием';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('Настройки'),
+        backgroundColor: AppColors.background,
+        elevation: 0,
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                // Секция безопасности
+                _buildSectionHeader('Безопасность'),
+                
+                // PIN-код
+                _buildSettingTile(
+                  icon: Icons.lock_outline,
+                  title: 'PIN-код',
+                  subtitle: _hasPinCode 
+                    ? 'PIN-код установлен' 
+                    : 'PIN-код не установлен',
+                  trailing: _hasPinCode 
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton(
+                            onPressed: _changePinCode,
+                            child: const Text('Изменить'),
+                          ),
+                          TextButton(
+                            onPressed: _removePinCode,
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.red,
+                            ),
+                            child: const Text('Удалить'),
+                          ),
+                        ],
+                      )
+                    : TextButton(
+                        onPressed: _changePinCode,
+                        child: const Text('Установить'),
+                      ),
+                ),
+                
+                // Скрытие seed фраз
+                _buildSettingTile(
+                  icon: Icons.visibility_off,
+                  title: 'Скрыть записи с seed фразами',
+                  subtitle: _hideSeedPhrases 
+                    ? 'Записи с seed фразами скрыты из списка' 
+                    : 'Записи с seed фразами отображаются в списке',
+                  trailing: Switch(
+                    value: _hideSeedPhrases,
+                    onChanged: _toggleSeedPhraseVisibility,
+                    activeColor: AppColors.button,
+                  ),
+                ),
+
+                // Биометрическая аутентификация
+                if (_biometricAvailable)
+                  _buildSettingTile(
+                    icon: Icons.fingerprint,
+                    title: _biometricType,
+                    subtitle: _biometricEnabled 
+                      ? 'Биометрическая аутентификация включена' 
+                      : 'Биометрическая аутентификация отключена',
+                    trailing: Switch(
+                      value: _biometricEnabled,
+                      onChanged: _toggleBiometric,
+                      activeColor: AppColors.button,
+                    ),
+                  ),
+                
+                // Диагностика биометрии
+                if (_biometricAvailable)
+                  _buildSettingTile(
+                    icon: Icons.bug_report,
+                    title: 'Диагностика биометрии',
+                    subtitle: 'Проверить состояние биометрической аутентификации',
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: _showBiometricDiagnostics,
+                  ),
+                
+                // Тестирование биометрии
+                if (_biometricAvailable)
+                  _buildSettingTile(
+                    icon: Icons.science,
+                    title: 'Тест биометрии',
+                    subtitle: 'Подробное тестирование биометрической аутентификации',
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () => Navigator.pushNamed(context, '/biometric-test'),
+                  ),
+                
+                // История паролей
+                _buildSettingTile(
+                  icon: Icons.history,
+                  title: 'История паролей',
+                  subtitle: 'Просмотр истории изменений паролей',
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () => Navigator.pushNamed(context, '/password-history'),
+                ),
+                
+                const SizedBox(height: 24),
+                
+                // Секция интерфейса
+                _buildSectionHeader('Интерфейс'),
+                
+                // Выбор темы
+                _buildSettingTile(
+                  icon: Icons.palette,
+                  title: 'Тема приложения',
+                  subtitle: ThemeManager.getThemeName(_currentTheme),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: _changeTheme,
+                ),
+                
+                const SizedBox(height: 24),
+                
+                // Секция аккаунта
+                _buildSectionHeader('Аккаунт'),
+                
+                // Обновление фавиконок
+                _buildSettingTile(
+                  icon: Icons.image,
+                  title: 'Обновить фавиконки',
+                  subtitle: 'Обновить фавиконки для всех паролей',
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: _updateFavicons,
+                ),
+                
+                // Выход
+                _buildSettingTile(
+                  icon: Icons.logout,
+                  title: 'Выйти из аккаунта',
+                  subtitle: 'Выйти из текущего аккаунта',
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: _logout,
+                ),
+                
+                const SizedBox(height: 24),
+                
+                // Секция информации
+                _buildSectionHeader('Информация'),
+                
+                // Версия приложения
+                _buildSettingTile(
+                  icon: Icons.info_outline,
+                  title: 'Версия приложения',
+                  subtitle: '0.2.1',
+                ),
+                
+                // О приложении
+                _buildSettingTile(
+                  icon: Icons.description_outlined,
+                  title: 'О приложении',
+                  subtitle: 'Менеджер паролей',
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () {
+                    showAboutDialog(
+                      context: context,
+                      applicationName: 'Менеджер паролей',
+                      applicationVersion: '1.0.0',
+                      applicationIcon: Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          color: AppColors.button.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Icon(
+                          Icons.lock_outline,
+                          color: AppColors.button,
+                          size: 32,
+                        ),
+                      ),
+                      children: const [
+                        Text(
+                          'Безопасное хранение и управление паролями.',
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                
+                const SizedBox(height: 32),
+                
+                // Плашка с информацией о создателе
+                _buildCreatorCard(),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+          color: AppColors.button,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSettingTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    Widget? trailing,
+    VoidCallback? onTap,
+  }) {
+    return Card(
+      color: AppColors.input,
+      margin: const EdgeInsets.only(bottom: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        leading: Icon(icon, color: AppColors.button),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: AppColors.text,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: const TextStyle(color: Colors.grey),
+        ),
+        trailing: trailing,
+        onTap: onTap,
+      ),
+    );
+  }
+
+  Widget _buildCreatorCard() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppColors.button.withOpacity(0.1),
+            AppColors.button.withOpacity(0.05),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.button.withOpacity(0.2),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppColors.button,
+                  AppColors.button.withOpacity(0.8),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.button.withOpacity(0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.code,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      'Создано ',
+                      style: TextStyle(
+                        color: Colors.grey,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const Text(
+                      'NK_TRIPLLE',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: const Text(
+                        '❤️',
+                        style: TextStyle(
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'С любовью к безопасности и удобству',
+                  style: TextStyle(
+                    color: Colors.grey.withOpacity(0.8),
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+} 
