@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/colors.dart';
 import '../config/app_config.dart';
 import '../widgets/otp_input_dialog.dart';
+import '../utils/secure_bytes.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -26,9 +27,14 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     final login = _loginController.text.trim();
-    final password = _passwordController.text.trim();
 
-    if (login.isEmpty || password.isEmpty) {
+    // Read password into a zeroed buffer immediately; clear the controller so
+    // the plaintext String is no longer referenced by UI state.
+    final securePassword = SecureBytes.fromString(_passwordController.text);
+    _passwordController.clear();
+
+    if (login.isEmpty || securePassword.isEmpty) {
+      securePassword.dispose();
       setState(() {
         _errorMessage = 'Пожалуйста, введите логин и пароль';
         _isLoading = false;
@@ -40,14 +46,14 @@ class _LoginScreenState extends State<LoginScreen> {
       final response = await http.post(
         Uri.parse(AppConfig.loginUrl),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({'login': login, 'password': password}),
+        // toUtf8String() used inline so the returned String is never stored
+        body: json.encode({'login': login, 'password': securePassword.toUtf8String()}),
       );
 
       final data = json.decode(response.body);
 
       if (response.statusCode == 200) {
         if (data['two_fa_required'] == true) {
-          // Показываем ввод OTP
           if (!mounted) return;
           final String? otpCode = await showDialog<String>(
             context: context,
@@ -55,8 +61,8 @@ class _LoginScreenState extends State<LoginScreen> {
           );
 
           if (otpCode != null) {
-            // Повторяем логин с OTP в заголовке
-            await _loginWithOTP(login, password, otpCode);
+            // securePassword is still alive here — disposed in finally below
+            await _loginWithOTP(login, securePassword, otpCode);
           } else {
             setState(() => _isLoading = false);
           }
@@ -64,11 +70,11 @@ class _LoginScreenState extends State<LoginScreen> {
         }
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('token', data['access_token']); // Backend returns access_token
-        
-        // Проверяем, установлен ли PIN-код
-        final pinCode = prefs.getString('pin_code');
-        if (pinCode != null) {
+        await prefs.setString('token', data['access_token']);
+
+        if (!mounted) return;
+        final pinHash = prefs.getString('pin_hash');
+        if (pinHash != null) {
           Navigator.pushReplacementNamed(context, '/pin');
         } else {
           Navigator.pushReplacementNamed(context, '/setup-pin');
@@ -83,13 +89,14 @@ class _LoginScreenState extends State<LoginScreen> {
         _errorMessage = 'Ошибка подключения к серверу';
       });
     } finally {
+      securePassword.dispose(); // zero out heap memory
       setState(() {
         _isLoading = false;
       });
     }
   }
 
-  Future<void> _loginWithOTP(String login, String password, String otp) async {
+  Future<void> _loginWithOTP(String login, SecureBytes securePassword, String otp) async {
     setState(() => _isLoading = true);
     try {
       final response = await http.post(
@@ -98,7 +105,7 @@ class _LoginScreenState extends State<LoginScreen> {
           'Content-Type': 'application/json',
           'X-OTP': otp,
         },
-        body: json.encode({'login': login, 'password': password}),
+        body: json.encode({'login': login, 'password': securePassword.toUtf8String()}),
       );
 
       final data = json.decode(response.body);
@@ -106,10 +113,10 @@ class _LoginScreenState extends State<LoginScreen> {
       if (response.statusCode == 200) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('token', data['access_token']);
-        
+
         if (!mounted) return;
-        final pinCode = prefs.getString('pin_code');
-        if (pinCode != null) {
+        final pinHash = prefs.getString('pin_hash');
+        if (pinHash != null) {
           Navigator.pushReplacementNamed(context, '/pin');
         } else {
           Navigator.pushReplacementNamed(context, '/setup-pin');
@@ -126,6 +133,7 @@ class _LoginScreenState extends State<LoginScreen> {
     } finally {
       setState(() => _isLoading = false);
     }
+    // securePassword disposed by caller (_login's finally block)
   }
 
   @override
@@ -207,7 +215,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                 ),
               ),
-              
+
               TextField(
                 controller: _loginController,
                 decoration: InputDecoration(

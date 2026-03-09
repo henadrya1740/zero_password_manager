@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../theme/colors.dart';
 import '../config/app_config.dart';
 import '../widgets/two_factor_setup_dialog.dart';
+import '../utils/secure_bytes.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -25,9 +26,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
     });
 
     final login = _loginController.text.trim();
-    final password = _passwordController.text.trim();
 
-    if (login.isEmpty || password.isEmpty) {
+    // Capture password into a zeroed buffer and clear the controller immediately
+    // so the plaintext String is no longer referenced by UI state.
+    final securePassword = SecureBytes.fromString(_passwordController.text);
+    _passwordController.clear();
+
+    if (login.isEmpty || securePassword.isEmpty) {
+      securePassword.dispose();
       setState(() {
         _errorMessage = 'Пожалуйста, введите логин и пароль';
         _isLoading = false;
@@ -39,18 +45,18 @@ class _SignUpScreenState extends State<SignUpScreen> {
       final response = await http.post(
         Uri.parse(AppConfig.registerUrl),
         headers: {'Content-Type': 'application/json'},
+        // toUtf8String() used inline — result not stored in a variable
         body: jsonEncode({
           'login': login,
-          'password': password,
+          'password': securePassword.toUtf8String(),
         }),
       );
 
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 201) {
-        // Успех - показываем настройку 2FA
         if (!mounted) return;
-        
+
         final bool? confirmed = await showDialog<bool>(
           context: context,
           barrierDismissible: false,
@@ -77,6 +83,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         _errorMessage = 'Ошибка подключения к серверу';
       });
     } finally {
+      securePassword.dispose(); // zero out heap memory
       setState(() {
         _isLoading = false;
       });
@@ -162,7 +169,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   ],
                 ),
               ),
-              
+
               TextField(
                 controller: _loginController,
                 decoration: InputDecoration(
