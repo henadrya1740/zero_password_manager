@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:typed_data';
+import 'dart:convert';
 import '../theme/colors.dart';
 
 class SetupPinScreen extends StatefulWidget {
@@ -12,20 +15,23 @@ class SetupPinScreen extends StatefulWidget {
 
 class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStateMixin {
   final List<TextEditingController> _controllers = List.generate(
-    4, 
+    4,
     (index) => TextEditingController(),
   );
   final List<FocusNode> _focusNodes = List.generate(
-    4, 
+    4,
     (index) => FocusNode(),
   );
-  
+
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
-  
-  String _pin = '';
-  String _confirmPin = '';
+
+  // PIN digits stored as raw bytes (ASCII codes of '0'..'9').
+  // Using Uint8List instead of String so the buffer can be zeroed after use.
+  Uint8List _pinBytes = Uint8List(0);
+  Uint8List _confirmPinBytes = Uint8List(0);
+
   bool _isConfirming = false;
   bool _isLoading = false;
   String? _errorMessage;
@@ -33,12 +39,12 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
   @override
   void initState() {
     super.initState();
-    
+
     _animationController = AnimationController(
       duration: const Duration(milliseconds: 1000),
       vsync: this,
     );
-    
+
     _fadeAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -46,7 +52,7 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
       parent: _animationController,
       curve: Curves.easeInOut,
     ));
-    
+
     _slideAnimation = Tween<Offset>(
       begin: const Offset(0, 0.3),
       end: Offset.zero,
@@ -54,10 +60,9 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
       parent: _animationController,
       curve: Curves.easeOutCubic,
     ));
-    
+
     _animationController.forward();
-    
-    // Добавляем слушатели для автоматического перехода между полями
+
     for (int i = 0; i < 4; i++) {
       _controllers[i].addListener(() {
         if (_controllers[i].text.length == 1 && i < 3) {
@@ -76,67 +81,81 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
       node.dispose();
     }
     _animationController.dispose();
+    // Zero out any residual PIN bytes
+    _pinBytes.fillRange(0, _pinBytes.length, 0);
+    _confirmPinBytes.fillRange(0, _confirmPinBytes.length, 0);
     super.dispose();
   }
 
+  /// Reads the current controller values into a fresh Uint8List and clears
+  /// the controllers so the digits are no longer held as Strings in TextField state.
+  Uint8List _collectAndClearControllers() {
+    final bytes = Uint8List(4);
+    for (int i = 0; i < 4; i++) {
+      final text = _controllers[i].text;
+      bytes[i] = text.isNotEmpty ? text.codeUnitAt(0) : 0;
+      _controllers[i].clear();
+    }
+    return bytes;
+  }
+
   void _onPinChanged() {
-    setState(() {
-      _pin = _controllers.map((controller) => controller.text).join();
-      _errorMessage = null;
-    });
-    
-    if (_pin.length == 4) {
+    final entered = _controllers.map((c) => c.text).join();
+    setState(() => _errorMessage = null);
+
+    if (entered.length == 4) {
+      // Collect bytes and immediately clear TextField state
+      _pinBytes = _collectAndClearControllers();
       _proceedToConfirm();
     }
   }
 
   void _proceedToConfirm() {
-    setState(() {
-      _isConfirming = true;
-    });
-    
-    // Очищаем поля для подтверждения
-    for (var controller in _controllers) {
-      controller.clear();
-    }
+    setState(() => _isConfirming = true);
     _focusNodes[0].requestFocus();
   }
 
   void _onConfirmPinChanged() {
-    setState(() {
-      _confirmPin = _controllers.map((controller) => controller.text).join();
-      _errorMessage = null;
-    });
-    
-    if (_confirmPin.length == 4) {
+    final entered = _controllers.map((c) => c.text).join();
+    setState(() => _errorMessage = null);
+
+    if (entered.length == 4) {
+      _confirmPinBytes = _collectAndClearControllers();
       _savePin();
     }
   }
 
   Future<void> _savePin() async {
-    if (_pin != _confirmPin) {
-      setState(() {
-        _errorMessage = 'PIN-коды не совпадают';
-      });
-      
-      // Очищаем поля подтверждения
-      for (var controller in _controllers) {
-        controller.clear();
-      }
+    // Constant-time byte comparison to avoid timing side-channels
+    bool match = _pinBytes.length == _confirmPinBytes.length;
+    for (int i = 0; i < _pinBytes.length; i++) {
+      if (_pinBytes[i] != _confirmPinBytes[i]) match = false;
+    }
+
+    // Zero confirm buffer — no longer needed
+    _confirmPinBytes.fillRange(0, _confirmPinBytes.length, 0);
+
+    if (!match) {
+      setState(() => _errorMessage = 'PIN-коды не совпадают');
       _focusNodes[0].requestFocus();
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
-      // Сохраняем PIN-код в SharedPreferences
+      // Store SHA-256 hash of the PIN bytes — never store the plaintext PIN.
+      // The verify screen computes the same hash and compares hex strings.
+      final hash = sha256.convert(_pinBytes).toString();
+
+      // Zero out the PIN buffer after hashing
+      _pinBytes.fillRange(0, _pinBytes.length, 0);
+
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('pin_code', _pin);
-      
-      // Показываем анимацию успеха
+      await prefs.setString('pin_hash', hash);
+      // Remove legacy plain-text key if present
+      await prefs.remove('pin_code');
+
       _showSuccessAnimation();
     } catch (e) {
       setState(() {
@@ -147,25 +166,21 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
   }
 
   void _showSuccessAnimation() {
-    // Прямой переход к паролям без диалога
     Navigator.pushNamedAndRemoveUntil(
-      context, 
-      '/passwords', 
-      (route) => false
+      context,
+      '/passwords',
+      (route) => false,
     );
   }
 
   void _goBack() {
     if (_isConfirming) {
+      // Zero out first-entry buffer when going back
+      _pinBytes.fillRange(0, _pinBytes.length, 0);
+      _pinBytes = Uint8List(0);
       setState(() {
         _isConfirming = false;
-        _confirmPin = '';
       });
-      
-      // Очищаем поля
-      for (var controller in _controllers) {
-        controller.clear();
-      }
       _focusNodes[0].requestFocus();
     } else {
       Navigator.pop(context);
@@ -194,7 +209,6 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Логотип
                   Container(
                     width: 80,
                     height: 80,
@@ -222,10 +236,9 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
                       color: AppColors.button,
                     ),
                   ),
-                  
+
                   const SizedBox(height: 40),
-                  
-                  // Заголовок
+
                   Text(
                     _isConfirming ? 'Подтвердите PIN-код' : 'Установите PIN-код',
                     style: TextStyle(
@@ -234,23 +247,22 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
                       color: AppColors.text,
                     ),
                   ),
-                  
+
                   const SizedBox(height: 8),
-                  
+
                   Text(
-                    _isConfirming 
-                      ? 'Повторите ввод для подтверждения'
-                      : 'Создайте 4-значный PIN-код для быстрого доступа',
+                    _isConfirming
+                        ? 'Повторите ввод для подтверждения'
+                        : 'Создайте 4-значный PIN-код для быстрого доступа',
                     style: const TextStyle(
                       fontSize: 16,
                       color: Colors.grey,
                     ),
                     textAlign: TextAlign.center,
                   ),
-                  
+
                   const SizedBox(height: 40),
-                  
-                  // Поля для PIN-кода
+
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: List.generate(4, (index) {
@@ -261,9 +273,9 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
                           color: AppColors.input,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: _focusNodes[index].hasFocus 
-                              ? AppColors.button 
-                              : Colors.transparent,
+                            color: _focusNodes[index].hasFocus
+                                ? AppColors.button
+                                : Colors.transparent,
                             width: 2,
                           ),
                           boxShadow: [
@@ -293,17 +305,16 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
                             border: InputBorder.none,
                             contentPadding: EdgeInsets.zero,
                           ),
-                          onChanged: (value) => _isConfirming 
-                            ? _onConfirmPinChanged() 
-                            : _onPinChanged(),
+                          onChanged: (value) => _isConfirming
+                              ? _onConfirmPinChanged()
+                              : _onPinChanged(),
                         ),
                       );
                     }),
                   ),
-                  
+
                   const SizedBox(height: 24),
-                  
-                  // Сообщение об ошибке
+
                   if (_errorMessage != null)
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 300),
@@ -326,18 +337,16 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
                         ),
                       ),
                     ),
-                  
+
                   const SizedBox(height: 24),
-                  
-                  // Индикатор загрузки
+
                   if (_isLoading)
                     CircularProgressIndicator(
                       valueColor: AlwaysStoppedAnimation<Color>(AppColors.button),
                     ),
-                  
+
                   const SizedBox(height: 40),
-                  
-                  // Подсказка
+
                   const Text(
                     'PIN-код должен содержать 4 цифры',
                     style: TextStyle(
@@ -346,17 +355,16 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
                     ),
                     textAlign: TextAlign.center,
                   ),
-                  
+
                   const SizedBox(height: 20),
-                  
-                  // Кнопка пропуска
+
                   if (!_isConfirming)
                     TextButton(
                       onPressed: () {
                         Navigator.pushNamedAndRemoveUntil(
-                          context, 
-                          '/passwords', 
-                          (route) => false
+                          context,
+                          '/passwords',
+                          (route) => false,
                         );
                       },
                       child: const Text(
@@ -375,4 +383,4 @@ class _SetupPinScreenState extends State<SetupPinScreen> with TickerProviderStat
       ),
     );
   }
-} 
+}
