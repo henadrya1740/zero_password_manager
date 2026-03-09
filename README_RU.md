@@ -1,6 +1,11 @@
 # 🔐 Zero Password Manager  
 ### Приватный • Self-Hosted • Менеджер паролей без облака на Flutter
 
+<!--
+Keywords: Менеджер паролей, Self-hosted, Zero-Knowledge, Приватность, Без облака, Flutter, FastAPI, AES-256-GCM, Argon2id, Cyberpunk UI, Glassmorphism, Open Source, Безопасность, 2FA, TOTP, Хранилище, Шифрование.
+Description: Премиальный, приватный, self-hosted менеджер паролей с потрясающим интерфейсом в стиле Cyberpunk и Glassmorphism. Создан на Flutter и FastAPI. Никаких облаков, только ваши данные под вашим контролем.
+-->
+
 **Zero Password Manager** — это **приватно-ориентированный менеджер паролей**, созданный на **Flutter**, который дает вам **полный контроль над вашими конфиденциальными данными**.
 
 В отличие от традиционных менеджеров паролей, **Zero Password Manager НЕ использует облачные хранилища**.  

@@ -1,6 +1,11 @@
 # 🔐 Zero Password Manager
 ### Private • Self-Hosted • No Cloud Password Manager Built With Flutter
 
+<!--
+Keywords: Password Manager, Self-hosted, Zero-Knowledge, Privacy-first, No Cloud, Flutter, FastAPI, AES-256-GCM, Argon2id, Cyberpunk UI, Glassmorphism, Open Source, Security, Hardened 2FA, TOTP, Vault, Encrypted Storage.
+Description: A premium, privacy-focused, self-hosted password manager with a stunning Cyberpunk/Glassmorphism UI. Built with Flutter and FastAPI. No cloud, no tracking, just you and your data.
+-->
+
 **Zero Password Manager** is a **privacy-first password manager built with Flutter** that gives you **full control over your sensitive data**.
 
 ---
