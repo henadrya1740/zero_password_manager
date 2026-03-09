@@ -5,6 +5,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/colors.dart';
 import '../config/app_config.dart';
 import '../widgets/otp_input_dialog.dart';
+import '../utils/passkey_service.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'screens/folders_screen.dart';
+import '../services/crypto_service.dart';
+import '../services/vault_service.dart';
+import '../services/cache_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -18,6 +24,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
+  final PasskeyService _passkeyService = PasskeyService();
 
   Future<void> _login() async {
     setState(() {
@@ -66,6 +73,12 @@ class _LoginScreenState extends State<LoginScreen> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('token', data['access_token']); // Backend returns access_token
         
+        // Zero-Knowledge: Derive and set Master Key
+        final salt = data['salt'];
+        if (salt != null) {
+          await VaultService().unlock(password, salt);
+        }
+
         // Проверяем, установлен ли PIN-код
         final pinCode = prefs.getString('pin_code');
         if (pinCode != null) {
@@ -81,6 +94,62 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       setState(() {
         _errorMessage = 'Ошибка подключения к серверу';
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loginWithPasskey() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      String deviceId = 'unknown';
+
+      if (Platform.isAndroid) {
+        final androidInfo = await deviceInfo.androidInfo;
+        deviceId = androidInfo.id;
+      } else if (Platform.isIOS) {
+        final iosInfo = await deviceInfo.iosInfo;
+        deviceId = iosInfo.identifierForVendor ?? 'unknown_ios';
+      }
+
+      final data = await _passkeyService.loginWithPasskey(deviceId);
+
+      if (data != null && data['access_token'] != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('token', data['access_token']);
+        
+        final vaultKey = await _passkeyService.getVaultKey();
+        if (vaultKey == null) {
+           if (mounted) {
+             ScaffoldMessenger.of(context).showSnackBar(
+               const SnackBar(content: Text('Вход выполнен. Требуется синхронизация ключа хранилища.')),
+             );
+           }
+        }
+
+        if (!mounted) return;
+        final pinCode = prefs.getString('pin_code');
+        if (pinCode != null) {
+          Navigator.pushReplacementNamed(context, '/pin');
+        } else {
+          Navigator.pushReplacementNamed(context, '/setup-pin');
+        }
+      } else {
+        setState(() {
+          _errorMessage = 'Ошибка входа через Passkey';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Ошибка: $e';
       });
     } finally {
       setState(() {
@@ -107,6 +176,12 @@ class _LoginScreenState extends State<LoginScreen> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('token', data['access_token']);
         
+        // Zero-Knowledge: Derive and set Master Key
+        final salt = data['salt'];
+        if (salt != null) {
+          await VaultService().unlock(password, salt);
+        }
+
         if (!mounted) return;
         final pinCode = prefs.getString('pin_code');
         if (pinCode != null) {
@@ -247,6 +322,17 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       child: const Text('Войти'),
                     ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _isLoading ? null : _loginWithPasskey,
+                icon: const Icon(Icons.fingerprint),
+                label: const Text('Войти с Passkey'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(200, 50),
+                  side: BorderSide(color: AppColors.button),
+                  foregroundColor: Colors.white,
+                ),
+              ),
               const SizedBox(height: 16),
               TextButton(
                 onPressed: () => Navigator.pushNamed(context, '/signup'),

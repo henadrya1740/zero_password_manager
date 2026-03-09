@@ -7,6 +7,7 @@ import '../config/app_config.dart';
 import '../utils/api_service.dart';
 import '../utils/password_history_service.dart';
 import '../utils/folder_service.dart';
+import '../services/vault_service.dart';
 
 // ── icon/color helpers (shared with folders_screen) ─────────────────────────
 
@@ -133,56 +134,21 @@ class _AddPasswordScreenState extends State<AddPasswordScreen> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token');
-
-      String fullUrl = site;
-      if (!site.startsWith('http://') && !site.startsWith('https://')) {
-        fullUrl = 'https://$site';
-      }
-
-      final body = <String, dynamic>{
-        'site_url': fullUrl,
-        'site_login': email,
-        'site_password': password,
-        'has_2fa': has2FA,
-        'has_seed_phrase': hasSeedPhrase,
-        'seed_phrase': seedPhraseController.text.trim(),
-        'notes': notesController.text.trim(),
-      };
-      if (_selectedFolderId != null) body['folder_id'] = _selectedFolderId;
-
-      final response = await ApiService.post(
-        AppConfig.passwordsUrl,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(body),
+      await VaultService().addPassword(
+        name: site, // Site name or URL
+        url: fullUrl,
+        login: email,
+        password: password,
+        notes: notesController.text.trim().isNotEmpty ? notesController.text.trim() : null,
+        folderId: _selectedFolderId,
       );
 
-      if (response.statusCode == 201) {
-        final data = jsonDecode(response.body);
-
-        await PasswordHistoryService.addPasswordHistory(
-          passwordId: data['id'],
-          actionType: 'CREATE',
-          actionDetails: {
-            'created_password': {
-              'site_url': fullUrl,
-              'site_login': email,
-              'has_2fa': has2FA,
-              'has_seed_phrase': hasSeedPhrase,
-            },
-          },
-          siteUrl: fullUrl,
-        );
-
-        if (mounted) Navigator.pop(context, true);
-      } else {
-        final data = jsonDecode(response.body);
-        setState(() => errorMessage = data['error'] ?? 'Ошибка при сохранении');
-      }
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      setState(() => errorMessage = 'Ошибка при сохранении: ${e.toString()}');
+    } finally {
+      setState(() => isLoading = false);
+    }
     } catch (e) {
       setState(() => errorMessage = 'Ошибка подключения к серверу');
     } finally {

@@ -5,6 +5,10 @@ import 'dart:convert';
 import '../theme/colors.dart';
 import '../config/app_config.dart';
 import '../utils/biometric_service.dart';
+import '../utils/passkey_service.dart';
+import 'package:nk3_zero/utils/api_service.dart';
+import 'dart:io';
+import 'package:device_info_plus/device_info_plus.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -21,6 +25,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _biometricAvailable = false;
   String _biometricType = 'Биометрическая аутентификация';
   AppTheme _currentTheme = AppTheme.dark;
+  final PasskeyService _passkeyService = PasskeyService();
+  List<dynamic> _devices = [];
+  bool _isPasskeyLoading = false;
+  String? _telegramChatId;
+  bool _isProfileLoading = false;
 
   @override
   void initState() {
@@ -29,6 +38,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadSeedPhraseSettings();
     _loadBiometricSettings();
     _loadThemeSettings();
+    _loadDevices();
+    _loadProfile();
   }
 
   Future<void> _checkPinCodeStatus() async {
@@ -709,6 +720,153 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _loadProfile() async {
+    setState(() => _isProfileLoading = true);
+    try {
+      final response = await ApiService.get(AppConfig.profileUrl);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _telegramChatId = data['telegram_chat_id'];
+        });
+      }
+    } catch (e) {
+      print('Error loading profile: $e');
+    } finally {
+      setState(() => _isProfileLoading = false);
+    }
+  }
+
+  Future<void> _bindTelegram() async {
+    final TextEditingController controller = TextEditingController(text: _telegramChatId);
+    
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.input,
+        title: const Text('Привязка Telegram', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Введите ваш Telegram Chat ID для получения уведомлений о безопасности.',
+              style: TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Chat ID',
+                labelStyle: TextStyle(color: Colors.grey),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
+              ),
+              keyboardType: TextInputType.number,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null) {
+      setState(() => _isProfileLoading = true);
+      try {
+        final response = await ApiService.post(
+          AppConfig.updateProfileUrl,
+          body: {'telegram_chat_id': result},
+        );
+
+        if (response.statusCode == 200) {
+          setState(() {
+            _telegramChatId = result;
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(backgroundColor: Colors.green, content: Text('Настройки Telegram сохранены')),
+            );
+          }
+        } else {
+           // Ошибки (включая OTP) обрабатываются в ApiService автоматически, 
+           // но если мы здесь, значит запрос все же не удался после всех попыток
+           if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(backgroundColor: Colors.red, content: Text('Ошибка при сохранении настроек')),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(backgroundColor: Colors.red, content: Text('Ошибка: $e')),
+          );
+        }
+      } finally {
+        setState(() => _isProfileLoading = false);
+      }
+    }
+  }
+
+  Future<void> _registerPasskey() async {
+    setState(() => _isPasskeyLoading = true);
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      String deviceName = 'Unknown Device';
+      String deviceId = 'unknown';
+
+      if (Platform.isAndroid) {
+        final androidInfo = await deviceInfo.androidInfo;
+        deviceName = androidInfo.model;
+        deviceId = androidInfo.id;
+      } else if (Platform.isIOS) {
+        final iosInfo = await deviceInfo.iosInfo;
+        deviceName = iosInfo.name;
+        deviceId = iosInfo.identifierForVendor ?? 'unknown_ios';
+      }
+
+      final success = await _passkeyService.registerPasskey(deviceName, deviceId);
+      if (success) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Passkey успешно зарегистрирован')),
+          );
+        }
+        _loadDevices();
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Ошибка регистрации Passkey')),
+          );
+        }
+      }
+    } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Ошибка: $e')),
+          );
+        }
+    } finally {
+      setState(() => _isPasskeyLoading = false);
+    }
+  }
+
+  Future<void> _revokeDevice(int id) async {
+    try {
+      final response = await ApiService.delete(AppConfig.getRevokeDeviceUrl(id));
+      if (response.statusCode == 200) {
+        _loadDevices();
+      }
+    } catch (e) {
+      print('Error revoking device: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -832,6 +990,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 
                 // Секция аккаунта
                 _buildSectionHeader('Аккаунт'),
+
+                // Telegram Binding
+                _buildSettingTile(
+                  icon: Icons.send,
+                  title: 'Уведомления Telegram',
+                  subtitle: _telegramChatId != null && _telegramChatId!.isNotEmpty
+                    ? 'Привязан Chat ID: $_telegramChatId'
+                    : 'Уведомления не настроены',
+                  trailing: _isProfileLoading 
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () async {
+                    final result = await Navigator.pushNamed(context, '/telegram-binding');
+                    if (result != null) _loadProfile();
+                  },
+                ),
+
+                // Passkeys
+                _buildSectionHeader('Passkeys (Безопасный вход)'),
+                _buildSettingTile(
+                  icon: Icons.vpn_key_outlined,
+                  title: 'Passkeys',
+                  subtitle: 'Управление ключами доступа для беспарольного входа',
+                  trailing: _isPasskeyLoading 
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.add_circle_outline),
+                  onTap: _registerPasskey,
+                ),
+                
+                if (_devices.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Column(
+                      children: _devices.map((device) => ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.devices, color: Colors.grey, size: 20),
+                        title: Text(device['device_name'], style: const TextStyle(color: Colors.white, fontSize: 14)),
+                        subtitle: Text('Последний вход: ${device['last_used_at'] != null ? DateTime.parse(device['last_used_at']).toLocal().toString().split('.')[0] : "никогда"}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                          onPressed: () => _revokeDevice(device['id']),
+                        ),
+                      )).toList(),
+                    ),
+                  ),
+
+                const SizedBox(height: 24),
                 
                 // Обновление фавиконок
                 _buildSettingTile(

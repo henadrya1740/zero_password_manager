@@ -6,12 +6,26 @@ import '../main.dart'; // Для navigatorKey
 import '../widgets/otp_input_dialog.dart';
 
 class ApiService {
+  static Future<Map<String, String>> _getHeaders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+    return {
+      'Content-Type': 'application/json',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
+  }
+
   static Future<http.Response> get(String url, {Map<String, String>? headers}) async {
-    return _handleRequest(() => http.get(Uri.parse(url), headers: headers), url, headers: headers);
+    final combinedHeaders = await _getHeaders();
+    if (headers != null) combinedHeaders.addAll(headers);
+    return _handleRequest(() => http.get(Uri.parse(url), headers: combinedHeaders), url, headers: combinedHeaders);
   }
 
   static Future<http.Response> post(String url, {Map<String, String>? headers, Object? body}) async {
-    return _handleRequest(() => http.post(Uri.parse(url), headers: headers, body: body), url, headers: headers, body: body);
+    final combinedHeaders = await _getHeaders();
+    if (headers != null) combinedHeaders.addAll(headers);
+    final encodedBody = body is String ? body : json.encode(body);
+    return _handleRequest(() => http.post(Uri.parse(url), headers: combinedHeaders, body: encodedBody), url, headers: combinedHeaders, body: encodedBody);
   }
 
   static Future<http.Response> put(String url, {Map<String, String>? headers, Object? body}) async {

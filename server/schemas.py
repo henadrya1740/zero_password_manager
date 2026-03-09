@@ -38,12 +38,45 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
+    telegram_chat_id: Optional[str] = None
 
 class UserResponse(UserBase):
     id: int
     salt: str  # Client needs salt for KDF
+    telegram_chat_id: Optional[str] = None
     totp_secret: Optional[str] = None
     totp_uri: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProfileUpdate(BaseModel):
+    password: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    totp_code: Optional[str] = None
+
+
+# ── WebAuthn Schemas ──────────────────────────────────────────────────────────
+
+class WebAuthnOptionsRequest(BaseModel):
+    device_name: Optional[str] = "Unknown Device"
+
+class WebAuthnRegistrationVerify(BaseModel):
+    registration_response: Dict[str, Any]
+    device_name: str
+    device_id: str
+
+class WebAuthnLoginVerify(BaseModel):
+    authentication_response: Dict[str, Any]
+    device_id: str
+    device_name: Optional[str] = "Passkey Login"
+
+class DeviceResponse(BaseModel):
+    id: int
+    device_name: str
+    last_used_at: datetime
+    is_active: bool
 
     class Config:
         from_attributes = True
@@ -60,8 +93,10 @@ class Token(BaseModel):
 
 
 class PasswordBase(BaseModel):
-    site_url: str
-    site_login: str
+    site_hash: Optional[str] = None # HMAC(masterKey, siteName)
+    site_url: Optional[str] = None  # To be deprecated/moved to encrypted_metadata
+    site_login: Optional[str] = None # To be deprecated/moved to encrypted_metadata
+    encrypted_metadata: Optional[str] = None # Client-side encrypted JSON
     has_2fa: bool = False
     has_seed_phrase: bool = False
     folder_id: Optional[int] = None

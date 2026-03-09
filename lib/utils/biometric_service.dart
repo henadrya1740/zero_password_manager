@@ -30,11 +30,11 @@ class BiometricService {
   }
 
   // Аутентификация пользователя и расшифровка секрета
-  static Future<bool> authenticate({
+  static Future<String?> authenticate({
     String reason = 'Подтвердите свою личность',
   }) async {
     try {
-      await FlutterLocker.retrieve(RetrieveSecretRequest(
+      final secret = await FlutterLocker.retrieve(RetrieveSecretRequest(
         key: _secretKey,
         androidPrompt: AndroidPrompt(
           title: reason,
@@ -45,10 +45,10 @@ class BiometricService {
         ),
       ));
       print('BiometricService: Authentication successful');
-      return true;
+      return secret;
     } catch (e) {
       print('BiometricService: Authentication failed: $e');
-      return false;
+      return null;
     }
   }
 

@@ -1,42 +1,85 @@
-from sqlalchemy.orm import Session
-from fastapi import HTTPException, status
+import httpx
 import re
-from typing import Optional
+from typing import Optional, List
+from sqlalchemy.orm import Session
+from fastapi import BackgroundTasks, HTTPException, status
 from . import models, schemas, auth
+from .config import settings
 
-def get_user_by_login(db: Session, login: str):
-    return db.query(models.User).filter(models.User.login == login).first()
+async def send_telegram_message(chat_id: str, text: str):
+    """Sends a security alert to Telegram (background task)."""
+    if not settings.TELEGRAM_BOT_TOKEN or not chat_id:
+        return
+    url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+    async with httpx.AsyncClient(timeout=5) as client:
+        try:
+            await client.post(url, json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "Markdown"
+            })
+        except Exception as e:
+            import logging
+            logging.error(f"Telegram notification failed: {e}")
 
-
-def audit_event(db: Session, user_id: int, event: str, meta: dict = None, ip: str = None):
+def audit_event(db: Session, user_id: int, event: str, meta: dict = None, ip: str = None, background_tasks: BackgroundTasks = None):
+    """Records audit trail and triggers async Telegram alerts for the user."""
+    # Ensure user exists for notification
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    
     db_audit = models.Audit(user_id=user_id, event=event, meta=meta or {}, ip_address=ip)
     db.add(db_audit)
     db.commit()
 
+    # Trigger Telegram Alert for critical events if user has chat_id
+    if user and user.telegram_chat_id and event in settings.CRITICAL_EVENTS and background_tasks:
+        # Filter meta to only keep safe fields
+        safe_meta = {}
+        if meta:
+            if "site_hash" in meta:
+                 safe_meta["site_hash"] = meta["site_hash"]
+        
+        user_info = f"User ID: {user_id}"
+        ip_info = f"IP: {ip}" if ip else ""
+        meta_info = f"Details: {safe_meta}" if safe_meta else ""
+        
+        message = f"🚨 *NK3 Security Alert*\n*Event*: `{event}`\n*User*: `{user_info}`\n{ip_info}\n{meta_info}"
+        background_tasks.add_task(send_telegram_message, user.telegram_chat_id, message)
+
 
 def validate_password_strength(password: str) -> bool:
-    """Min 12 chars, uppercase, lowercase, digit"""
-    return (
-        len(password) >= 12 and
-        re.search(r'[A-Z]', password) and
-        re.search(r'[a-z]', password) and
-        re.search(r'\d', password)
-    )
+    """Hardened password policy: 14+ chars, upper, lower, digit, special symbol"""
+    if len(password) < 14:
+        return False
+    if not re.search(r'[A-Z]', password):
+        return False
+    if not re.search(r'[a-z]', password):
+        return False
+    if not re.search(r'\d', password):
+        return False
+    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        return False
+    return True
 
 
-def create_user(db: Session, user: schemas.UserCreate):
+def create_user(db: Session, user: schemas.UserCreate, background_tasks: BackgroundTasks = None):
     if not validate_password_strength(user.password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password too weak. Minimum 12 characters, including uppercase, lowercase, and a digit."
+            detail="Password too weak. Minimum 14 characters, including uppercase, lowercase, digits, and special symbols."
         )
     salt = auth.generate_salt()
     hashed_password = auth.get_password_hash(user.password)
-    db_user = models.User(login=user.login, hashed_password=hashed_password, salt=salt)
+    db_user = models.User(
+        login=user.login, 
+        hashed_password=hashed_password, 
+        salt=salt,
+        telegram_chat_id=user.telegram_chat_id
+    )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    audit_event(db, db_user.id, "register")
+    audit_event(db, db_user.id, "register", background_tasks=background_tasks)
     return db_user
 
 
@@ -51,13 +94,13 @@ def update_user_totp(db: Session, user_id: int, secret: str = None, enabled: boo
     return user
 
 
-def get_passwords(db: Session, user_id: int):
-    audit_event(db, user_id, "vault_read")
+def get_passwords(db: Session, user_id: int, background_tasks: BackgroundTasks = None):
+    audit_event(db, user_id, "vault_read", background_tasks=background_tasks)
     return db.query(models.Password).filter(models.Password.user_id == user_id).all()
 
 
-def create_password(db: Session, password: schemas.PasswordCreate, user_id: int):
-    # Validate folder ownership if folder_id provided
+def create_password(db: Session, password: schemas.PasswordCreate, user_id: int, background_tasks: BackgroundTasks = None):
+    # ... (folder ownership check)
     if password.folder_id is not None:
         folder = db.query(models.Folder).filter(
             models.Folder.id == password.folder_id,
@@ -66,14 +109,13 @@ def create_password(db: Session, password: schemas.PasswordCreate, user_id: int)
         if not folder:
             raise HTTPException(status_code=404, detail="Folder not found")
 
-    # Pure Zero-Knowledge: Just store what the client sends
     db_password = models.Password(
         user_id=user_id,
         folder_id=password.folder_id,
-        site_url=password.site_url,
-        site_login=password.site_login,
+        site_hash=password.site_hash,
         encrypted_payload=password.encrypted_payload,
         notes_encrypted=password.notes_encrypted,
+        encrypted_metadata=password.encrypted_metadata,
         has_2fa=password.has_2fa,
         has_seed_phrase=password.has_seed_phrase
     )
@@ -81,12 +123,13 @@ def create_password(db: Session, password: schemas.PasswordCreate, user_id: int)
     db.commit()
     db.refresh(db_password)
 
-    audit_event(db, user_id, "vault_create", meta={"site_url": password.site_url})
+    audit_event(db, user_id, "vault_create", meta={"site_hash": password.site_hash}, background_tasks=background_tasks)
 
     return db_password
 
 
-def update_password(db: Session, password_id: int, password: schemas.PasswordUpdate, user_id: int):
+def update_password(db: Session, password_id: int, password: schemas.PasswordUpdate, user_id: int, background_tasks: BackgroundTasks = None):
+    # ...
     db_password = db.query(models.Password).filter(
         models.Password.id == password_id,
         models.Password.user_id == user_id
@@ -103,20 +146,20 @@ def update_password(db: Session, password_id: int, password: schemas.PasswordUpd
             raise HTTPException(status_code=404, detail="Folder not found")
 
     db_password.folder_id = password.folder_id
-    db_password.site_url = password.site_url
-    db_password.site_login = password.site_login
+    db_password.site_hash = password.site_hash
     db_password.encrypted_payload = password.encrypted_payload
     db_password.notes_encrypted = password.notes_encrypted
+    db_password.encrypted_metadata = password.encrypted_metadata
     db_password.has_2fa = password.has_2fa
     db_password.has_seed_phrase = password.has_seed_phrase
     db.commit()
     db.refresh(db_password)
 
-    audit_event(db, user_id, "vault_update", meta={"site_url": password.site_url})
+    audit_event(db, user_id, "vault_update", meta={"site_hash": password.site_hash}, background_tasks=background_tasks)
     return db_password
 
 
-def delete_password(db: Session, password_id: int, user_id: int):
+def delete_password(db: Session, password_id: int, user_id: int, background_tasks: BackgroundTasks = None):
     db_password = db.query(models.Password).filter(
         models.Password.id == password_id,
         models.Password.user_id == user_id
@@ -124,7 +167,7 @@ def delete_password(db: Session, password_id: int, user_id: int):
     if not db_password:
         raise HTTPException(status_code=404, detail="Password not found")
 
-    audit_event(db, user_id, "vault_delete", meta={"site_url": db_password.site_url})
+    audit_event(db, user_id, "vault_delete", meta={"site_hash": db_password.site_hash}, background_tasks=background_tasks)
     db.delete(db_password)
     db.commit()
 
@@ -151,7 +194,7 @@ def get_folders(db: Session, user_id: int):
     return result
 
 
-def create_folder(db: Session, folder: schemas.FolderCreate, user_id: int):
+def create_folder(db: Session, folder: schemas.FolderCreate, user_id: int, background_tasks: BackgroundTasks = None):
     db_folder = models.Folder(
         user_id=user_id,
         name=folder.name,
@@ -161,11 +204,11 @@ def create_folder(db: Session, folder: schemas.FolderCreate, user_id: int):
     db.add(db_folder)
     db.commit()
     db.refresh(db_folder)
-    audit_event(db, user_id, "folder_create", meta={"name": folder.name})
+    audit_event(db, user_id, "folder_create", meta={"name": folder.name}, background_tasks=background_tasks)
     return db_folder
 
 
-def update_folder(db: Session, folder_id: int, folder: schemas.FolderUpdate, user_id: int):
+def update_folder(db: Session, folder_id: int, folder: schemas.FolderUpdate, user_id: int, background_tasks: BackgroundTasks = None):
     db_folder = db.query(models.Folder).filter(
         models.Folder.id == folder_id,
         models.Folder.user_id == user_id
@@ -182,11 +225,11 @@ def update_folder(db: Session, folder_id: int, folder: schemas.FolderUpdate, use
 
     db.commit()
     db.refresh(db_folder)
-    audit_event(db, user_id, "folder_update", meta={"id": folder_id})
+    audit_event(db, user_id, "folder_update", meta={"id": folder_id}, background_tasks=background_tasks)
     return db_folder
 
 
-def delete_folder(db: Session, folder_id: int, user_id: int):
+def delete_folder(db: Session, folder_id: int, user_id: int, background_tasks: BackgroundTasks = None):
     db_folder = db.query(models.Folder).filter(
         models.Folder.id == folder_id,
         models.Folder.user_id == user_id
@@ -199,12 +242,12 @@ def delete_folder(db: Session, folder_id: int, user_id: int):
         models.Password.folder_id == folder_id
     ).update({"folder_id": None})
 
-    audit_event(db, user_id, "folder_delete", meta={"id": folder_id})
+    audit_event(db, user_id, "folder_delete", meta={"id": folder_id}, background_tasks=background_tasks)
     db.delete(db_folder)
     db.commit()
 
 
-def get_passwords_by_folder(db: Session, folder_id: int, user_id: int):
+def get_passwords_by_folder(db: Session, folder_id: int, user_id: int, background_tasks: BackgroundTasks = None):
     # Verify folder ownership
     folder = db.query(models.Folder).filter(
         models.Folder.id == folder_id,
@@ -213,15 +256,114 @@ def get_passwords_by_folder(db: Session, folder_id: int, user_id: int):
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
 
-    audit_event(db, user_id, "vault_read", meta={"folder_id": folder_id})
+    audit_event(db, user_id, "vault_read", meta={"folder_id": folder_id}, background_tasks=background_tasks)
     return db.query(models.Password).filter(
         models.Password.folder_id == folder_id,
         models.Password.user_id == user_id
     ).all()
 
 
-def get_history(db: Session, user_id: int):
-    audit_event(db, user_id, "history_read")
+# ── WebAuthn CRUD ─────────────────────────────────────────────────────────────
+
+def create_challenge(db: Session, user_id: Optional[int], challenge: str, type: str):
+    # Cleanup expired challenges first
+    db.query(models.WebAuthnChallenge).filter(
+        models.WebAuthnChallenge.expires_at < datetime.now(timezone.utc)
+    ).delete()
+    
+    db_challenge = models.WebAuthnChallenge(
+        user_id=user_id,
+        challenge=challenge,
+        type=type,
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=120)
+    )
+    db.add(db_challenge)
+    db.commit()
+    db.refresh(db_challenge)
+    return db_challenge
+
+
+def get_challenge(db: Session, challenge: str):
+    return db.query(models.WebAuthnChallenge).filter(
+        models.WebAuthnChallenge.challenge == challenge,
+        models.WebAuthnChallenge.expires_at > datetime.now(timezone.utc)
+    ).first()
+
+
+def delete_challenge(db: Session, challenge: str):
+    db.query(models.WebAuthnChallenge).filter(
+        models.WebAuthnChallenge.challenge == challenge
+    ).delete()
+    db.commit()
+
+
+def create_webauthn_credential(db: Session, user_id: int, credential_id: str, public_key: bytes, sign_count: int, transports: Optional[List[str]]):
+    db_cred = models.WebAuthnCredential(
+        user_id=user_id,
+        credential_id=credential_id,
+        public_key=public_key,
+        sign_count=sign_count,
+        transports=transports
+    )
+    db.add(db_cred)
+    db.commit()
+    db.refresh(db_cred)
+    return db_cred
+
+
+def get_webauthn_credential_by_id(db: Session, credential_id: str):
+    return db.query(models.WebAuthnCredential).filter(
+        models.WebAuthnCredential.credential_id == credential_id
+    ).first()
+
+
+def update_webauthn_sign_count(db: Session, credential_id: str, new_count: int):
+    db.query(models.WebAuthnCredential).filter(
+        models.WebAuthnCredential.credential_id == credential_id
+    ).update({"sign_count": new_count})
+    db.commit()
+
+
+def upsert_user_device(db: Session, user_id: int, device_id: str, device_name: str):
+    db_device = db.query(models.UserDevice).filter(
+        models.UserDevice.user_id == user_id,
+        models.UserDevice.device_id == device_id
+    ).first()
+    
+    if db_device:
+        db_device.device_name = device_name
+        db_device.last_used_at = datetime.now(timezone.utc)
+        db_device.is_active = True
+    else:
+        db_device = models.UserDevice(
+            user_id=user_id,
+            device_id=device_id,
+            device_name=device_name
+        )
+        db.add(db_device)
+    
+    db.commit()
+    db.refresh(db_device)
+    return db_device
+
+
+def get_user_devices(db: Session, user_id: int):
+    return db.query(models.UserDevice).filter(
+        models.UserDevice.user_id == user_id,
+        models.UserDevice.is_active == True
+    ).all()
+
+
+def revoke_device(db: Session, device_id: int, user_id: int):
+    db.query(models.UserDevice).filter(
+        models.UserDevice.id == device_id,
+        models.UserDevice.user_id == user_id
+    ).update({"is_active": False})
+    db.commit()
+
+
+def get_history(db: Session, user_id: int, background_tasks: BackgroundTasks = None):
+    audit_event(db, user_id, "history_read", background_tasks=background_tasks)
     return db.query(models.PasswordHistory).filter(models.PasswordHistory.user_id == user_id).order_by(models.PasswordHistory.created_at.desc()).all()
 
 

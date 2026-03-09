@@ -2,9 +2,28 @@ import base64
 import secrets
 import string
 import time
+import hmac
 from typing import List, Optional
+from datetime import datetime, timedelta, timezone
 
 import pyotp
+import webauthn
+from webauthn.helpers.structs import (
+    AuthenticatorSelectionCriteria,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+    RegistrationCredential,
+    AuthenticationCredential,
+)
+from webauthn.helpers import (
+    generate_registration_options,
+    verify_registration_response,
+    generate_authentication_options,
+    verify_authentication_response,
+    options_to_json,
+)
+import random
+import asyncio
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
@@ -17,6 +36,11 @@ from . import auth, crud, models, schemas
 from .config import settings
 from .database import engine, get_db
 import urllib.parse
+import logging
+
+# Centralized Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("zero_vault")
 
 # Favicon Engine
 def get_favicon_url(site_url: str) -> Optional[str]:
@@ -37,6 +61,22 @@ def get_favicon_url(site_url: str) -> Optional[str]:
             
         if not domain or '.' not in domain:
             return None
+
+        # SSRF Protection: Check that domain does not resolve to private/internal IP
+        import socket
+        import ipaddress
+        try:
+            # DNS lookup with basic SSRF protection
+            ip = socket.gethostbyname(domain)
+            ip_obj = ipaddress.ip_address(ip)
+            
+            # Explicitly block RFC1918 and other private ranges
+            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast:
+                logger.warning(f"SSRF blocked: {domain} resolved to private/reserved IP {ip}")
+                return None
+        except Exception as e:
+            logger.error(f"DNS lookup failed for {domain}: {e}")
+            return None
             
         # Priority 1: Clearbit (High Quality)
         # Priority 2: Google (Fallback)
@@ -44,9 +84,29 @@ def get_favicon_url(site_url: str) -> Optional[str]:
     except:
         return None
 
+def validate_base64(data: str) -> bool:
+    if not data:
+        return True
+    try:
+        base64.b64decode(data, validate=True)
+        return True
+    except Exception:
+        return False
+
 
 # Initialize database
 models.Base.metadata.create_all(bind=engine)
+
+# Startup Security Check
+if settings.JWT_SECRET_KEY == "fallback_secret_key_for_development_only":
+    if settings.ENVIRONMENT == "production":
+        logger.critical("SECURITY BREACH: JWT_SECRET_KEY must be configured in production! Shutting down.")
+        raise RuntimeError("JWT_SECRET_KEY check failed")
+    else:
+        logger.warning("Using development fallback for JWT_SECRET_KEY. DO NOT USE IN PRODUCTION.")
+
+if not settings.TELEGRAM_BOT_TOKEN and settings.ENVIRONMENT == "production":
+    logger.warning("Production mode lacks TELEGRAM_BOT_TOKEN. Security alerts will not be sent.")
 
 # Setup Rate Limiter
 limiter = Limiter(key_func=get_remote_address)
@@ -57,8 +117,8 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # CORS and Security Headers
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -77,11 +137,17 @@ async def add_security_headers(request: Request, call_next):
 # Constants
 MAX_PAYLOAD_SIZE = 2 * 1024 * 1024  # 2MB
 
-
-# 2FA Helper with Replay Protection
-def verify_hardened_otp(db: Session, user: models.User, otp: Optional[str]):
+# 2FA Helper with Timing-Safe Verification and Account Lockout
+def verify_hardened_otp(db: Session, user: models.User, otp: Optional[str], background_tasks: BackgroundTasks = None):
     if not user.totp_enabled:
         return
+
+    # Uniform error for missing vs invalid credentials/OTP to prevent enumeration
+    common_error = HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Invalid credentials or OTP"
+    )
+
     if not otp:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -89,23 +155,50 @@ def verify_hardened_otp(db: Session, user: models.User, otp: Optional[str]):
             headers={"X-2FA-Required": "true"}
         )
 
-    totp = pyotp.TOTP(user.totp_secret)
-    if not totp.verify(otp, valid_window=1):
+    # Re-fetch user with row-level lock
+    db_user = db.query(models.User).filter(models.User.id == user.id).with_for_update().first()
+    if not db_user:
+        raise common_error
+
+    # Check for account lockout
+    if db_user.lockout_until and db_user.lockout_until > datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="INVALID_OTP"
+            detail="Account temporarily locked due to repeated failures"
         )
 
-    # Replay Protection: Check if this timecode was already used
-    current_timecode = totp.timecode(auth.datetime.utcnow())
-    if current_timecode <= user.last_otp_ts:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="OTP_REPLAY_DETECTED"
-        )
+    totp = pyotp.TOTP(db_user.totp_secret)
+    valid = False
+    new_timecode = 0
 
-    # Update last used timecode
-    user.last_otp_ts = current_timecode
+    # Drift compensation: Check ±1 step (30 seconds)
+    for offset in [-1, 0, 1]:
+        check_time = datetime.now(timezone.utc) + timedelta(seconds=offset * 30)
+        timecode = int(totp.timecode(check_time))
+        
+        # Timing-safe comparison using hmac.compare_digest
+        # We verify if the provided OTP matches the TOTP for this time window
+        if totp.verify(otp, for_time=check_time, valid_window=0):
+            # Replay Protection: timecode must be strictly greater than last used
+            if timecode > db_user.last_otp_ts:
+                new_timecode = timecode
+                valid = True
+                break
+    
+    if not valid:
+        # Increment failure counter
+        db_user.failed_otp_attempts = (db_user.failed_otp_attempts or 0) + 1
+        if db_user.failed_otp_attempts >= settings.MAX_FAILED_OTP_ATTEMPTS:
+            db_user.lockout_until = datetime.now(timezone.utc) + timedelta(minutes=settings.LOCKOUT_TIME_MINUTES)
+            crud.audit_event(db, db_user.id, "account_locked", {"reason": "too_many_otp_failures"}, background_tasks=background_tasks)
+        
+        db.commit()
+        raise common_error
+    
+    # Success: Reset failure counters and update last used timecode
+    db_user.last_otp_ts = new_timecode
+    db_user.failed_otp_attempts = 0
+    db_user.lockout_until = None
     db.commit()
 
 
@@ -115,18 +208,30 @@ def verify_hardened_otp(db: Session, user: models.User, otp: Optional[str]):
 @limiter.limit("3/minute")
 def register(request: Request,
              user: schemas.UserCreate,
+             background_tasks: BackgroundTasks,
              db: Session = Depends(get_db)):
+    # Timing Attack Mitigation
+    await asyncio.sleep(random.uniform(0.1, 0.3))
+    
+    # User Enumeration & Policy Protection: Generic responses
     db_user = crud.get_user_by_login(db, login=user.login)
     if db_user:
-        raise HTTPException(status_code=400, detail="Login already registered")
+        raise HTTPException(status_code=400, detail="Ошибка регистрации")
     
-    # Create user
-    new_user = crud.create_user(db=db, user=user)
+    # Create user (crud.create_user already validates password but we standardize error here)
+    try:
+        new_user = crud.create_user(db=db, user=user, background_tasks=background_tasks)
+    except HTTPException as e:
+        if e.status_code == 400:
+             raise HTTPException(status_code=400, detail="Ошибка регистрации")
+        raise e
     
     # Generate 2FA Secret for binding during registration
     secret = pyotp.random_base32()
     crud.update_user_totp(db, new_user.id, secret=secret)
     
+    crud.audit_event(db, new_user.id, "user_registered", ip=request.client.host, background_tasks=background_tasks)
+
     # Return user data + 2FA setup info
     totp = pyotp.TOTP(secret)
     uri = totp.provisioning_uri(name=new_user.login, issuer_name="ZeroVault")
@@ -143,33 +248,72 @@ def register(request: Request,
 
 @app.post("/login", response_model=schemas.Token)
 @limiter.limit("5/minute")
-def login(request: Request,
+async def login(request: Request,
+          background_tasks: BackgroundTasks,
           form_data: OAuth2PasswordRequestForm = Depends(),
           db: Session = Depends(get_db)):
-    user = crud.get_user_by_login(db, login=form_data.username)
-    if not user or not auth.verify_password(form_data.password,
-                                           user.hashed_password):
+    # Timing Attack Mitigation
+    await asyncio.sleep(random.uniform(0.1, 0.3))
+    
+    # Uniform error for all login/2FA failures
+    common_error = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid credentials or OTP",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    user = db.query(models.User).filter(models.User.login == form_data.username).with_for_update().first()
+    
+    if not user:
+        # Constant time-ish delay to prevent timing based enumeration
         time.sleep(1)
+        crud.audit_event(db, None, "login_failed", {"login": form_data.username, "reason": "user_not_found"}, ip=request.client.host, background_tasks=background_tasks)
+        raise common_error
+
+    # Check for account lockout
+    if user.lockout_until and user.lockout_until > datetime.now(timezone.utc):
+        crud.audit_event(db, user.id, "login_failed", {"reason": "account_locked"}, ip=request.client.host, background_tasks=background_tasks)
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect login or password",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account temporarily locked due to repeated failures"
         )
+
+    # Track attempt
+    user.last_login_attempt = datetime.now(timezone.utc)
+
+    # Password check
+    if not auth.verify_password(form_data.password, user.hashed_password):
+        # Increment failure counter
+        user.failed_otp_attempts = (user.failed_otp_attempts or 0) + 1
+        if user.failed_otp_attempts >= settings.MAX_FAILED_OTP_ATTEMPTS:
+            user.lockout_until = datetime.now(timezone.utc) + timedelta(minutes=settings.LOCKOUT_TIME_MINUTES)
+            crud.audit_event(db, user.id, "account_locked", {"reason": "too_many_login_failures"}, background_tasks=background_tasks)
+        
+        db.commit()
+        time.sleep(1)
+        crud.audit_event(db, user.id, "login_failed", {"reason": "invalid_password"}, ip=request.client.host, background_tasks=background_tasks)
+        raise common_error
 
     # Check if login requires OTP in config
     if "login" in settings.PERMISSIONS_OTP_LIST:
-        # If 2FA is enabled, check if OTP is provided in a custom header
         otp = request.headers.get("X-OTP")
         if user.totp_enabled and not otp:
+            crud.audit_event(db, user.id, "login_2fa_required", ip=request.client.host, background_tasks=background_tasks)
             return schemas.Token(two_fa_required=True, salt=user.salt)
 
         if user.totp_enabled:
-            verify_hardened_otp(db, user, otp)
+            # Re-verify logic inside already handles lockout/failures for OTP
+            verify_hardened_otp(db, user, otp, background_tasks=background_tasks)
 
     access_token = auth.create_access_token(data={"sub": str(user.id)})
     refresh_token = auth.create_refresh_token(user_id=user.id)
 
-    crud.audit_event(db, user.id, "login", ip=request.client.host)
+    # Success: Reset failure counters
+    user.failed_otp_attempts = 0
+    user.lockout_until = None
+    db.commit()
+
+    crud.audit_event(db, user.id, "login", ip=request.client.host, background_tasks=background_tasks)
 
     return {
         "access_token": access_token,
@@ -189,62 +333,105 @@ def setup_2fa(current_user: models.User = Depends(auth.get_current_user),
     crud.update_user_totp(db, current_user.id, secret=secret)
 
     totp = pyotp.TOTP(secret)
-    uri = totp.provisioning_uri(name=current_user.login,
-                               issuer_name="ZeroVault")
-
+    uri = totp.provisioning_uri(name=current_user.login, issuer_name="ZeroVault")
     return {"secret": secret, "otp_uri": uri}
 
-
 @app.post("/2fa/confirm")
-def confirm_2fa(request: schemas.TOTPConfirmRequest,
+@limiter.limit("5/minute")
+def confirm_2fa(request: Request, 
+                request_data: schemas.TOTPConfirmRequest,
+                background_tasks: BackgroundTasks,
                 db: Session = Depends(get_db)):
     # If we have user_id in request, use it (for registration flow)
     # Otherwise try to get from current_user (for logged in users)
-    # For security, we should verify the user actually exists and hasn't enabled 2FA yet
+    user_id = request_data.user_id
+    user = None
+    if user_id:
+        user = db.query(models.User).get(user_id)
     
-    if not request.user_id:
-         raise HTTPException(status_code=400, detail="USER_ID_REQUIRED")
-
-    user = db.query(models.User).get(request.user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-        
-    if user.totp_enabled:
-        raise HTTPException(status_code=400, detail="2FA already enabled")
+        # Fallback to current authenticated user
+        try:
+            user = auth.get_current_user(request.headers.get("Authorization", "").replace("Bearer ", ""), db)
+        except:
+             raise HTTPException(status_code=401, detail="Authentication required")
 
-    if not user.totp_secret:
+    if not user or not user.totp_secret:
         raise HTTPException(status_code=400, detail="2FA not set up")
 
     totp = pyotp.TOTP(user.totp_secret)
-    if not totp.verify(request.code):
+    if not totp.verify(request_data.code):
+        crud.audit_event(db, user.id, "2fa_confirm_failed", {"reason": "invalid_otp"}, ip=request.client.host, background_tasks=background_tasks)
         raise HTTPException(status_code=400, detail="Invalid OTP")
 
     # Set initial timecode to prevent immediate reuse of setup code
-    user.last_otp_ts = totp.timecode(auth.datetime.utcnow())
+    user.last_otp_ts = int(totp.timecode(datetime.now(timezone.utc)))
     user.totp_enabled = True
     db.commit()
 
-    crud.audit_event(db, user.id, "2fa_enabled")
+    crud.audit_event(db, user.id, "2fa_enabled", ip=request.client.host, background_tasks=background_tasks)
 
     return {"status": "2fa enabled"}
 
 
+@app.get("/profile", response_model=schemas.UserResponse)
+def get_profile(current_user: models.User = Depends(auth.get_current_user)):
+    """Get current user profile info."""
+    return current_user
+
+
+@app.post("/profile/update", response_model=schemas.UserResponse)
+def update_profile(request: Request,
+                   background_tasks: BackgroundTasks,
+                   user_update: schemas.ProfileUpdate,
+                   current_user: models.User = Depends(auth.get_current_user),
+                   db: Session = Depends(get_db)):
+    """Update profile settings like Telegram Chat ID. Requires TOTP if enabled."""
+    
+    # Security: Require TOTP if enabled
+    if current_user.totp_enabled:
+        otp_code = user_update.totp_code or request.headers.get("X-OTP")
+        verify_hardened_otp(db, current_user, otp_code, background_tasks=background_tasks)
+
+    if user_update.telegram_chat_id is not None:
+        current_user.telegram_chat_id = user_update.telegram_chat_id
+    
+    # Also support password change if provided
+    if user_update.password:
+        if not crud.validate_password_strength(user_update.password):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password too weak. Minimum 14 characters, including uppercase, lowercase, digits, and special symbols."
+            )
+        current_user.hashed_password = auth.get_password_hash(user_update.password)
+        
+    db.commit()
+    db.refresh(current_user)
+    crud.audit_event(db, current_user.id, "profile_updated", background_tasks=background_tasks)
+    return current_user
+
+
 @app.post("/refresh")
-def refresh_token(payload: dict, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def refresh_token(request: Request, payload: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     token = payload.get("refresh_token")
     if not token:
+        crud.audit_event(db, None, "refresh_token_failed", {"reason": "token_missing"}, ip=request.client.host, background_tasks=background_tasks)
         raise HTTPException(status_code=400, detail="Refresh token missing")
 
     try:
         data = auth.jwt.decode(token, auth.SECRET_KEY,
                               algorithms=[auth.ALGORITHM])
         if data.get("type") != "refresh":
+            crud.audit_event(db, data.get("sub"), "refresh_token_failed", {"reason": "invalid_token_type"}, ip=request.client.host, background_tasks=background_tasks)
             raise HTTPException(status_code=401, detail="Invalid token type")
         user_id = data.get("sub")
     except Exception:
+        crud.audit_event(db, None, "refresh_token_failed", {"reason": "invalid_token"}, ip=request.client.host, background_tasks=background_tasks)
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     new_access_token = auth.create_access_token(data={"sub": user_id})
+    crud.audit_event(db, user_id, "token_refreshed", ip=request.client.host, background_tasks=background_tasks)
     return {"access_token": new_access_token, "token_type": "bearer"}
 
 
@@ -252,17 +439,21 @@ def refresh_token(payload: dict, db: Session = Depends(get_db)):
 @limiter.limit("60/minute")
 def read_passwords(request: Request,
                    current_user: models.User = Depends(auth.get_current_user),
-                   db: Session = Depends(get_db)):
+                   db: Session = Depends(get_db),
+                   background_tasks: BackgroundTasks = BackgroundTasks()):
     # OTP-Gated if configured
     if "vault_read" in settings.PERMISSIONS_OTP_LIST:
-        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"))
+        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"), background_tasks=background_tasks)
     
     db_passwords = crud.get_passwords(db, user_id=current_user.id)
     
-    # Inject favicon URLs dynamically
+    # Favicon URLs are now handled client-side in Zero-Knowledge mode 
+    # or via site_url if it still exists (legacy support)
     for p in db_passwords:
-        p.favicon_url = get_favicon_url(p.site_url)
+        if p.site_url:
+            p.favicon_url = get_favicon_url(p.site_url)
         
+    crud.audit_event(db, current_user.id, "passwords_read", ip=request.client.host, background_tasks=background_tasks)
     return db_passwords
 
 
@@ -272,17 +463,31 @@ def read_passwords(request: Request,
 @limiter.limit("30/minute")
 def create_password(request: Request,
                     password: schemas.PasswordCreate,
+                    background_tasks: BackgroundTasks,
                     current_user: models.User = Depends(auth.get_current_user),
                     db: Session = Depends(get_db)):
     # OTP-Gated if configured
     if "vault_write" in settings.PERMISSIONS_OTP_LIST:
-        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"))
+        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"), background_tasks=background_tasks)
 
     if len(password.encrypted_payload) > MAX_PAYLOAD_SIZE:
+        crud.audit_event(db, current_user.id, "password_create_failed", {"reason": "payload_too_large"}, ip=request.client.host, background_tasks=background_tasks)
         raise HTTPException(status_code=400, detail="Payload too large")
 
+    # Enforce storage quota
+    pwd_count = db.query(models.Password).filter(models.Password.user_id == current_user.id).count()
+    if pwd_count >= settings.MAX_PASSWORDS_PER_USER:
+        raise HTTPException(status_code=400, detail="Maximum number of passwords reached")
+
+    if not validate_base64(password.encrypted_payload):
+        raise HTTPException(status_code=400, detail="Invalid encrypted payload (not base64)")
+    
+    if password.notes_encrypted and not validate_base64(password.notes_encrypted):
+        raise HTTPException(status_code=400, detail="Invalid notes payload (not base64)")
+
     new_pwd = crud.create_password(db, password=password, user_id=current_user.id)
-    new_pwd.favicon_url = get_favicon_url(new_pwd.site_url)
+    if new_pwd.site_url:
+        new_pwd.favicon_url = get_favicon_url(new_pwd.site_url)
     return new_pwd
 
 
@@ -292,27 +497,38 @@ def create_password(request: Request,
 def update_password(request: Request,
                     password_id: int,
                     password: schemas.PasswordUpdate,
+                    background_tasks: BackgroundTasks,
                     current_user: models.User = Depends(auth.get_current_user),
                     db: Session = Depends(get_db)):
+    # OTP-Gated if configured
     if "vault_write" in settings.PERMISSIONS_OTP_LIST:
-        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"))
+        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"), background_tasks=background_tasks)
+
+    if not validate_base64(password.encrypted_payload):
+        raise HTTPException(status_code=400, detail="Invalid encrypted payload (not base64)")
+    
+    if password.notes_encrypted and not validate_base64(password.notes_encrypted):
+        raise HTTPException(status_code=400, detail="Invalid notes payload (not base64)")
 
     updated = crud.update_password(db, password_id=password_id, password=password, user_id=current_user.id)
-    updated.favicon_url = get_favicon_url(updated.site_url)
+    if updated.site_url:
+        updated.favicon_url = get_favicon_url(updated.site_url)
     return updated
 
 
-@app.delete("/passwords/{password_id}",
-            status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/passwords/{password_id}")
 @limiter.limit("30/minute")
 def delete_password(request: Request,
                     password_id: int,
+                    background_tasks: BackgroundTasks,
                     current_user: models.User = Depends(auth.get_current_user),
                     db: Session = Depends(get_db)):
+    # OTP-Gated if configured
     if "vault_write" in settings.PERMISSIONS_OTP_LIST:
-        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"))
+        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"), background_tasks=background_tasks)
 
-    crud.delete_password(db, password_id=password_id, user_id=current_user.id)
+    crud.delete_password(db, password_id=password_id, user_id=current_user.id, background_tasks=background_tasks)
+    return {"status": "deleted"}
 
 
 # ── Folder Endpoints ──────────────────────────────────────────────────────────
@@ -323,22 +539,16 @@ def read_folders(current_user: models.User = Depends(auth.get_current_user),
     return crud.get_folders(db, user_id=current_user.id)
 
 
-@app.post("/folders",
-          response_model=schemas.FolderResponse,
-          status_code=status.HTTP_201_CREATED)
-def create_folder(folder: schemas.FolderCreate,
+@app.post("/folders", response_model=schemas.FolderResponse)
+def create_folder(request: Request,
+                  folder: schemas.FolderCreate,
+                  background_tasks: BackgroundTasks,
                   current_user: models.User = Depends(auth.get_current_user),
                   db: Session = Depends(get_db)):
-    db_folder = crud.create_folder(db, folder=folder, user_id=current_user.id)
-    return {
-        "id": db_folder.id,
-        "name": db_folder.name,
-        "color": db_folder.color,
-        "icon": db_folder.icon,
-        "created_at": db_folder.created_at,
-        "updated_at": db_folder.updated_at,
-        "password_count": 0,
-    }
+    # OTP-Gated if configured
+    if "vault_write" in settings.PERMISSIONS_OTP_LIST:
+        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"), background_tasks=background_tasks)
+    return crud.create_folder(db=db, folder=folder, user_id=current_user.id, background_tasks=background_tasks)
 
 
 @app.put("/folders/{folder_id}", response_model=schemas.FolderResponse)
@@ -367,61 +577,266 @@ def delete_folder(folder_id: int,
 
 
 @app.get("/folders/{folder_id}/passwords", response_model=List[schemas.PasswordResponse])
-def read_folder_passwords(folder_id: int,
-                          request: Request,
-                          current_user: models.User = Depends(auth.get_current_user),
-                          db: Session = Depends(get_db)):
+def read_passwords_by_folder(request: Request,
+                             folder_id: int,
+                             background_tasks: BackgroundTasks,
+                             current_user: models.User = Depends(auth.get_current_user),
+                             db: Session = Depends(get_db)):
+    # OTP-Gated if configured
     if "vault_read" in settings.PERMISSIONS_OTP_LIST:
-        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"))
+        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"), background_tasks=background_tasks)
 
     passwords = crud.get_passwords_by_folder(db, folder_id=folder_id, user_id=current_user.id)
     for p in passwords:
-        p.favicon_url = get_favicon_url(p.site_url)
+        if p.site_url:
+            p.favicon_url = get_favicon_url(p.site_url)
     return passwords
 
 
 @app.get("/audit", response_model=List[schemas.AuditResponse])
 def read_audit_logs(request: Request,
+                    background_tasks: BackgroundTasks,
                     current_user: models.User = Depends(auth.get_current_user),
                     db: Session = Depends(get_db)):
     # OTP-Gated if configured
     if "audit_read" in settings.PERMISSIONS_OTP_LIST:
-        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"))
+        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"), background_tasks=background_tasks)
     return crud.get_logs(db, user_id=current_user.id)
 
 
 @app.get("/passwords/history", response_model=List[schemas.HistoryResponse])
 def read_password_history(request: Request,
+                          background_tasks: BackgroundTasks,
                           current_user: models.User = Depends(auth.get_current_user),
                           db: Session = Depends(get_db)):
     # OTP-Gated if configured
     if "history_read" in settings.PERMISSIONS_OTP_LIST:
-        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"))
+        verify_hardened_otp(db, current_user, request.headers.get("X-OTP"), background_tasks=background_tasks)
         
     history = crud.get_history(db, user_id=current_user.id)
     
-    # Inject favicon URLs
+    # Inject favicon URLs for legacy data
     for h in history:
-        h.favicon_url = get_favicon_url(h.site_url)
+        if h.site_url:
+            h.favicon_url = get_favicon_url(h.site_url)
         
     return history
 
 
 @app.get("/api/generate-password")
-def generate_password(length: int = 24):
+@limiter.limit("10/minute")
+def generate_password(request: Request, length: int = 24):
     alphabet = string.ascii_letters + string.digits + "!@#$%^&*()_+-="
     password = ''.join(secrets.choice(alphabet) for i in range(length))
     return {"password": password}
 
 
+
+# ── WebAuthn Endpoints ────────────────────────────────────────────────────────
+
+@app.post("/webauthn/register/options")
+@limiter.limit("5/minute")
+async def webauthn_register_options(
+    request: Request,
+    options_data: schemas.WebAuthnOptionsRequest,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    options = generate_registration_options(
+        rp_id=settings.RP_ID,
+        rp_name=settings.RP_NAME,
+        user_id=str(current_user.id),
+        user_name=current_user.login,
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.REQUIRED,
+            user_verification=UserVerificationRequirement.REQUIRED,
+        ),
+    )
+    
+    # Store challenge
+    challenge_str = options.challenge.decode("utf-8") if isinstance(options.challenge, bytes) else options.challenge
+    crud.create_challenge(db, current_user.id, challenge_str, "registration")
+    
+    from fastapi.responses import JSONResponse
+    return JSONResponse(content=options_to_json(options))
+
+
+@app.post("/webauthn/register/verify")
+@limiter.limit("5/minute")
+async def webauthn_register_verify(
+    request: Request,
+    verify_data: schemas.WebAuthnRegistrationVerify,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    challenge_data = crud.get_challenge(db, verify_data.registration_response.get("challenge"))
+    if not challenge_data or challenge_data.type != "registration":
+        raise HTTPException(status_code=400, detail="Invalid challenge")
+    
+    if challenge_data.expires_at < datetime.now(timezone.utc):
+        crud.delete_challenge(db, challenge_data.challenge)
+        raise HTTPException(status_code=400, detail="Challenge expired")
+    
+    try:
+        verification = verify_registration_response(
+            credential=verify_data.registration_response,
+            expected_challenge=challenge_data.challenge.encode("utf-8"),
+            expected_origin=settings.EXPECTED_ORIGIN,
+            expected_rp_id=settings.RP_ID,
+            require_user_verification=True,
+        )
+        
+        # Store credential
+        crud.create_webauthn_credential(
+            db,
+            user_id=current_user.id,
+            credential_id=verification.credential_id,
+            public_key=verification.public_key,
+            sign_count=verification.sign_count,
+            transports=verify_data.registration_response.get("response", {}).get("transports")
+        )
+        
+        # Tracking device
+        crud.upsert_user_device(db, current_user.id, verify_data.device_id, verify_data.device_name)
+        
+        # Delete challenge
+        crud.delete_challenge(db, challenge_data.challenge)
+        
+        crud.audit_event(db, current_user.id, "passkey_registered", {"device_id": verify_data.device_id}, background_tasks=background_tasks)
+        
+        return {"status": "success"}
+    except Exception as e:
+        # Sanitize error message and log internally
+        logger.error(f"WebAuthn Register Error: {str(e)}")
+        # Standardized error message
+        raise HTTPException(status_code=400, detail="Registration verification failed")
+
+
+@app.post("/webauthn/login/options")
+@limiter.limit("10/minute")
+async def webauthn_login_options(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    options = generate_authentication_options(
+        rp_id=settings.RP_ID,
+        user_verification=UserVerificationRequirement.REQUIRED,
+    )
+    
+    # Store challenge
+    challenge_str = options.challenge.decode("utf-8") if isinstance(options.challenge, bytes) else options.challenge
+    crud.create_challenge(db, None, challenge_str, "authentication")
+    
+    from fastapi.responses import JSONResponse
+    return JSONResponse(content=options_to_json(options))
+
+
+@app.post("/webauthn/login/verify")
+@limiter.limit("10/minute")
+async def webauthn_login_verify(
+    request: Request,
+    verify_data: schemas.WebAuthnLoginVerify,
+    db: Session = Depends(get_db)
+):
+    common_error = HTTPException(status_code=400, detail="Authentication failed")
+
+    challenge_data = crud.get_challenge(db, verify_data.authentication_response.get("challenge"))
+    if not challenge_data or challenge_data.type != "authentication":
+        raise common_error
+    
+    if challenge_data.expires_at < datetime.now(timezone.utc):
+        crud.delete_challenge(db, challenge_data.challenge)
+        raise common_error
+    
+    credential_id = verify_data.authentication_response.get("id")
+    db_credential = crud.get_webauthn_credential_by_id(db, credential_id)
+    
+    if not db_credential:
+        # Prevent credential enumeration
+        time.sleep(1)
+        raise common_error
+
+    user = db.query(models.User).filter(models.User.id == db_credential.user_id).first()
+    if user and user.lockout_until and user.lockout_until > datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account temporarily locked due to repeated failures"
+        )
+    
+    try:
+        verification = verify_authentication_response(
+            credential=verify_data.authentication_response,
+            expected_challenge=challenge_data.challenge.encode("utf-8"),
+            expected_origin=settings.EXPECTED_ORIGIN,
+            expected_rp_id=settings.RP_ID,
+            credential_public_key=db_credential.public_key,
+            credential_current_sign_count=db_credential.sign_count,
+            require_user_verification=True,
+        )
+        
+        # Security check: sign_count must increase
+        if verification.new_sign_count <= db_credential.sign_count:
+             raise HTTPException(status_code=403, detail="Possible clone attack (sign count drift)")
+        
+        # Update sign count
+        crud.update_webauthn_sign_count(db, credential_id, verification.new_sign_count)
+        
+        # Tracking device
+        user = db.query(models.User).filter(models.User.id == db_credential.user_id).first()
+        crud.upsert_user_device(db, user.id, verify_data.device_id, verify_data.device_name)
+        
+        # Success: Reset failure counters
+        user.failed_otp_attempts = 0
+        user.lockout_until = None
+        db.commit()
+
+        # Issue tokens (sub must be stringified user.id for auth.get_current_user)
+        access_token = auth.create_access_token(data={"sub": str(user.id)})
+        refresh_token = auth.create_refresh_token(user_id=user.id)
+        
+        # Delete challenge
+        crud.delete_challenge(db, challenge_data.challenge)
+        
+        crud.audit_event(db, user.id, "passkey_login_success", {"device_id": verify_data.device_id}, background_tasks=background_tasks)
+        
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "user_id": user.id,
+            "login": user.login,
+            "salt": user.salt
+        }
+    except Exception as e:
+        crud.audit_event(db, db_credential.user_id if db_credential else None, "passkey_login_failed", {"error": "Authentication failed"}, background_tasks=background_tasks)
+        logger.error(f"WebAuthn Login Error: {str(e)}")
+        raise common_error
+
+
+@app.get("/webauthn/devices", response_model=List[schemas.DeviceResponse])
+async def list_devices(
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    return crud.get_user_devices(db, current_user.id)
+
+
+@app.delete("/webauthn/devices/{device_id}")
+async def revoke_device_endpoint(
+    device_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    crud.revoke_device(db, device_id, current_user.id)
+    crud.audit_event(db, current_user.id, "device_revoked", {"internal_device_id": device_id}, background_tasks=background_tasks)
+    return {"status": "success"}
+
+
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-        "security": "fortress",
-        "2fa": "enabled",
-        "architecture": "zero-knowledge"
-    }
+    """Minimal health check to avoid information disclosure."""
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":

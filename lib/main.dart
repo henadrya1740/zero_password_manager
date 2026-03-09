@@ -12,8 +12,10 @@ import 'screens/settings_screen.dart';
 import 'screens/biometric_test_screen.dart';
 import 'screens/password_history_screen.dart';
 import 'screens/folders_screen.dart';
+import 'screens/telegram_binding_screen.dart';
 import 'theme/colors.dart';
 import 'utils/config_test.dart';
+import 'services/cache_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,6 +24,9 @@ void main() async {
   const environment = String.fromEnvironment('ENVIRONMENT', defaultValue: 'dev');
   await dotenv.load(fileName: 'env.$environment');
   
+  // Инициализируем локальный кэш (Hive)
+    await CacheService().init();
+
   // Загружаем сохраненную тему
   await _loadSavedTheme();
   
@@ -77,6 +82,7 @@ class _PasswordManagerAppState extends State<PasswordManagerApp> {
         '/biometric-test': (context) => const BiometricTestScreen(),
         '/password-history': (context) => const PasswordHistoryScreen(),
         '/folders': (context) => const FoldersScreen(),
+        '/telegram-binding': (context) => const TelegramBindingScreen(),
       },
     );
   }

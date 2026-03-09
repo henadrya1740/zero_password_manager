@@ -13,6 +13,8 @@ import 'folders_screen.dart';
 import '../config/app_config.dart';
 import '../utils/api_service.dart';
 import '../utils/folder_service.dart';
+import '../services/vault_service.dart';
+import '../services/cache_service.dart';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -115,36 +117,41 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
     await _loadSeedPhraseSettings();
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token');
-
-      final response = await ApiService.get(
-        AppConfig.passwordsUrl,
-        headers: {'Authorization': 'Bearer $token'},
-      );
-
-      if (response.statusCode == 200) {
-        final List data = json.decode(response.body);
+      final decryptedData = await VaultService().syncVault();
+      
+      setState(() {
+        passwords = decryptedData.map<Map<String, dynamic>>((item) => {
+          'id': item['id'],
+          'title': item['name'] ?? item['site_url'] ?? 'Безымянный', // From metadata
+          'subtitle': item['site_login'] ?? 'Нет логина', // From metadata
+          'password': item['encrypted_payload'], // Still encrypted
+          'has_2fa': item['has_2fa'],
+          'has_seed_phrase': item['has_seed_phrase'],
+          'seed_phrase': item['seed_phrase'],
+          'notes_encrypted': item['notes_encrypted'],
+          'favicon_url': item['favicon_url'],
+          'folder_id': item['folder_id'],
+          'site_url': item['site_url'], // From metadata
+        }).toList();
+        isLoading = false;
+      });
+    } catch (e) {
+      // If error, try to load from cache
+      final cachedHashes = CacheService().getAllCachedHashes();
+      if (cachedHashes.isNotEmpty) {
+        final List<Map<String, dynamic>> cachedList = [];
+        for (var hash in cachedHashes) {
+          final pwd = CacheService().getCachedPassword(hash);
+          if (pwd != null) cachedList.add(pwd);
+        }
+        
         setState(() {
-          passwords = data.map<Map<String, dynamic>>((item) => {
-            'id': item['id'],
-            'title': item['site_url'],
-            'subtitle': item['site_login'],
-            'password': item['site_password'],
-            'has_2fa': item['has_2fa'],
-            'has_seed_phrase': item['has_seed_phrase'],
-            'seed_phrase': item['seed_phrase'],
-            'notes': item['notes'],
-            'favicon_url': item['favicon_url'],
-            'folder_id': item['folder_id'],
-          }).toList();
+          passwords = cachedList; // Already partially decrypted metadata if synced before
           isLoading = false;
         });
       } else {
         setState(() => isLoading = false);
       }
-    } catch (e) {
-      setState(() => isLoading = false);
     }
   }
 
@@ -292,19 +299,30 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
 
   // ── clipboard helpers ───────────────────────────────────────────────────────
 
-  void _copyPassword(String password) {
-    if (password.isEmpty) return;
-    Clipboard.setData(ClipboardData(text: password));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: AppColors.button,
-        content: const Row(children: [
-          Icon(Icons.check_circle, color: Colors.white),
-          SizedBox(width: 10),
-          Text('Пароль скопирован в буфер обмена', style: TextStyle(color: Colors.white)),
-        ]),
-      ),
-    );
+  void _copyPassword(String encryptedPassword) async {
+    if (encryptedPassword.isEmpty) return;
+    
+    try {
+      final decrypted = await VaultService().decryptPayload(encryptedPassword);
+      Clipboard.setData(ClipboardData(text: decrypted));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.button,
+          content: const Row(children: [
+            Icon(Icons.check_circle, color: Colors.white),
+            SizedBox(width: 10),
+            Text('Пароль дешифрован и скопирован', style: TextStyle(color: Colors.white)),
+          ]),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.red,
+          content: Text('Ошибка дешифрования'),
+        ),
+      );
+    }
   }
 
   void _copySeedPhrase(String seedPhrase) {

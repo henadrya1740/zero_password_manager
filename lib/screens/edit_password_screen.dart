@@ -8,6 +8,7 @@ import '../config/app_config.dart';
 import '../utils/api_service.dart';
 import '../utils/password_history_service.dart';
 import '../utils/folder_service.dart';
+import '../services/vault_service.dart';
 
 // ── helpers (same as add_password_screen) ────────────────────────────────────
 
@@ -75,16 +76,40 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
     super.initState();
     siteController.text = widget.password['title'] ?? '';
     emailController.text = widget.password['subtitle'] ?? '';
-    passwordController.text = widget.password['password'] ?? '';
+    
+    // Decrypt sensitive fields for editing
+    _decryptInitialValues();
+
     has2FA = widget.password['has_2fa'] ?? false;
     hasSeedPhrase = widget.password['has_seed_phrase'] ?? false;
-    seedPhraseController.text = widget.password['seed_phrase'] ?? '';
-    notesController.text = widget.password['notes'] ?? '';
     _selectedFolderId = widget.password['folder_id'] as int?;
 
     if (siteController.text.isNotEmpty) _loadFavicon(siteController.text);
     siteController.addListener(() => _loadFavicon(siteController.text));
     _loadFolders();
+  }
+
+  Future<void> _decryptInitialValues() async {
+    try {
+      if (widget.password['password'] != null) {
+        passwordController.text = await VaultService().decryptPayload(widget.password['password']);
+      }
+      if (widget.password['notes_encrypted'] != null) {
+        notesController.text = await VaultService().decryptPayload(widget.password['notes_encrypted']);
+      }
+      if (widget.password['seed_phrase_encrypted'] != null) {
+        seedPhraseController.text = await VaultService().decryptPayload(widget.password['seed_phrase_encrypted']);
+      } else if (widget.password['seed_phrase'] != null) {
+         // Handle legacy unencrypted seed_phrase if any (not expected in ZK branch)
+         seedPhraseController.text = widget.password['seed_phrase'];
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка дешифрования данных: ${e.toString()}')),
+        );
+      }
+    }
   }
 
   @override
@@ -146,95 +171,30 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token');
+      final siteId = widget.password['id'];
+      if (siteId == null) throw Exception("Missing password ID");
 
-      String fullUrl = site;
-      if (!site.startsWith('http://') && !site.startsWith('https://')) {
-        fullUrl = 'https://$site';
+      await VaultService().updatePassword(
+        id: siteId,
+        name: site,
+        url: fullUrl,
+        login: email,
+        password: password,
+        notes: notesController.text.trim().isNotEmpty ? notesController.text.trim() : null,
+        seedPhrase: hasSeedPhrase && seedPhraseController.text.trim().isNotEmpty 
+            ? seedPhraseController.text.trim() 
+            : null,
+        folderId: _selectedFolderId,
+      );
+
+      if (mounted) {
+        Navigator.pop(context, true);
       }
-
-      final passwordId = widget.password['id'];
-      final body = <String, dynamic>{
-        'site_url': fullUrl,
-        'site_login': email,
-        'site_password': password,
-        'has_2fa': has2FA,
-        'has_seed_phrase': hasSeedPhrase,
-        'seed_phrase': seedPhraseController.text.trim(),
-        'notes': notesController.text.trim(),
-        'folder_id': _selectedFolderId,
-      };
-
-      http.Response response;
-      if (passwordId != null) {
-        // Use new ID-based endpoint
-        response = await ApiService.put(
-          '${AppConfig.passwordsUrl}/$passwordId',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode(body),
-        );
-      } else {
-        // Fallback: old URL-based endpoint
-        final originalSite = widget.password['title'] ?? '';
-        final apiUrl = AppConfig.getPasswordUrl(originalSite);
-        response = await http.put(
-          Uri.parse(apiUrl),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode(body),
-        );
-      }
-
-      if (response.statusCode == 200) {
-        final updatedData = jsonDecode(response.body);
-
-        await PasswordHistoryService.addPasswordHistory(
-          passwordId: updatedData['id'] ?? passwordId,
-          actionType: 'UPDATE',
-          actionDetails: {
-            'old': {
-              'site_url': widget.password['title'] ?? '',
-              'site_login': widget.password['subtitle'] ?? '',
-              'has_2fa': widget.password['has_2fa'] ?? false,
-              'has_seed_phrase': widget.password['has_seed_phrase'] ?? false,
-            },
-            'new': {
-              'site_url': fullUrl,
-              'site_login': email,
-              'has_2fa': has2FA,
-              'has_seed_phrase': hasSeedPhrase,
-            },
-          },
-          siteUrl: fullUrl,
-        );
-
-        if (mounted) {
-          Navigator.pop(context, {
-            'success': true,
-            'data': {
-              'id': updatedData['id'] ?? passwordId,
-              'title': updatedData['site_url'] ?? fullUrl,
-              'subtitle': updatedData['site_login'] ?? email,
-              'password': updatedData['site_password'] ?? password,
-              'has_2fa': updatedData['has_2fa'] ?? has2FA,
-              'has_seed_phrase': updatedData['has_seed_phrase'] ?? hasSeedPhrase,
-              'seed_phrase': updatedData['seed_phrase'] ?? seedPhraseController.text.trim(),
-              'notes': updatedData['notes'] ?? notesController.text.trim(),
-              'favicon_url': updatedData['favicon_url'],
-              'folder_id': updatedData['folder_id'] ?? _selectedFolderId,
-            }
-          });
-        }
-      } else {
-        final data = jsonDecode(response.body);
-        setState(() => errorMessage = data['error'] ?? data['detail'] ?? 'Ошибка при сохранении');
-      }
+    } catch (e) {
+      setState(() => errorMessage = 'Ошибка при сохранении: ${e.toString()}');
+    } finally {
+      setState(() => isLoading = false);
+    }
     } catch (e) {
       setState(() => errorMessage = 'Ошибка подключения к серверу');
     } finally {

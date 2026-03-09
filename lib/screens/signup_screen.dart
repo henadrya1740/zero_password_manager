@@ -4,6 +4,8 @@ import 'dart:convert';
 import '../theme/colors.dart';
 import '../config/app_config.dart';
 import '../widgets/two_factor_setup_dialog.dart';
+import '../services/vault_service.dart';
+import '../services/crypto_service.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -61,11 +63,17 @@ class _SignUpScreenState extends State<SignUpScreen> {
         );
 
         if (confirmed == true) {
+          // Zero-Knowledge: Derive and set Master Key after successful setup
+          final salt = data['salt'];
+          if (salt != null) {
+            await VaultService().unlock(password, salt);
+          }
+
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Регистрация и 2FA успешно настроены')),
           );
-          Navigator.pushReplacementNamed(context, '/login');
+          Navigator.pushReplacementNamed(context, '/passwords'); // Direct to vault if unlocked
         }
       } else {
         setState(() {

@@ -36,8 +36,18 @@ class AppConfig {
   static String get updateFaviconsUrl => '$apiUrl/update-favicons';
   static String get passwordHistoryUrl => '$apiUrl/password-history';
   static String get foldersUrl => '$apiUrl/folders';
+  static String get profileUrl => '$apiUrl/profile';
+  static String get updateProfileUrl => '$apiUrl/profile/update';
+
+  // WebAuthn Endpoints
+  static String get webauthnRegisterOptionsUrl => '$apiUrl/webauthn/register/options';
+  static String get webauthnRegisterVerifyUrl => '$apiUrl/webauthn/register/verify';
+  static String get webauthnLoginOptionsUrl => '$apiUrl/webauthn/login/options';
+  static String get webauthnLoginVerifyUrl => '$apiUrl/webauthn/login/verify';
+  static String get webauthnDevicesUrl => '$apiUrl/webauthn/devices';
 
   static String getPasswordUrl(String siteUrl) => '$apiUrl/passwords/${Uri.encodeComponent(siteUrl)}';
   static String getFolderPasswordsUrl(int folderId) => '$apiUrl/folders/$folderId/passwords';
   static String getFolderUrl(int folderId) => '$apiUrl/folders/$folderId';
-} 
+  static String getRevokeDeviceUrl(int deviceId) => '$apiUrl/webauthn/devices/$deviceId';
+}
