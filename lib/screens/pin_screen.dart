@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:typed_data';
 import '../theme/colors.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
@@ -15,21 +17,23 @@ class PinScreen extends StatefulWidget {
 
 class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
   final List<TextEditingController> _controllers = List.generate(
-    4, 
+    4,
     (index) => TextEditingController(),
   );
   final List<FocusNode> _focusNodes = List.generate(
-    4, 
+    4,
     (index) => FocusNode(),
   );
-  
+
   late AnimationController _animationController;
   late AnimationController _shakeController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
   late Animation<double> _shakeAnimation;
-  
-  String _pin = '';
+
+  // PIN stored as raw bytes (ASCII codes of '0'..'9') — zeroed after each use.
+  Uint8List _pinBytes = Uint8List(0);
+
   bool _isLoading = false;
   String? _errorMessage;
   int _attempts = 0;
@@ -39,17 +43,17 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    
+
     _animationController = AnimationController(
       duration: const Duration(milliseconds: 1000),
       vsync: this,
     );
-    
+
     _shakeController = AnimationController(
       duration: const Duration(milliseconds: 500),
       vsync: this,
     );
-    
+
     _fadeAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -57,7 +61,7 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
       parent: _animationController,
       curve: Curves.easeInOut,
     ));
-    
+
     _slideAnimation = Tween<Offset>(
       begin: const Offset(0, 0.3),
       end: Offset.zero,
@@ -65,7 +69,7 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
       parent: _animationController,
       curve: Curves.easeOutCubic,
     ));
-    
+
     _shakeAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -73,11 +77,10 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
       parent: _shakeController,
       curve: Curves.elasticIn,
     ));
-    
+
     _animationController.forward();
     _checkBiometricAvailability();
-    
-    // Добавляем слушатели для автоматического перехода между полями
+
     for (int i = 0; i < 4; i++) {
       _controllers[i].addListener(() {
         if (_controllers[i].text.length == 1 && i < 3) {
@@ -97,36 +100,64 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
     }
     _animationController.dispose();
     _shakeController.dispose();
+    // Zero out any residual PIN bytes
+    _pinBytes.fillRange(0, _pinBytes.length, 0);
     super.dispose();
   }
 
+  /// Reads the current controller values into a fresh Uint8List and clears
+  /// the controllers so the digits are no longer held as Strings in TextField state.
+  Uint8List _collectAndClearControllers() {
+    final bytes = Uint8List(4);
+    for (int i = 0; i < 4; i++) {
+      final text = _controllers[i].text;
+      bytes[i] = text.isNotEmpty ? text.codeUnitAt(0) : 0;
+      _controllers[i].clear();
+    }
+    return bytes;
+  }
+
   void _onPinChanged() {
-    setState(() {
-      _pin = _controllers.map((controller) => controller.text).join();
-      _errorMessage = null;
-    });
-    
-    if (_pin.length == 4) {
+    final entered = _controllers.map((c) => c.text).join();
+    setState(() => _errorMessage = null);
+
+    if (entered.length == 4) {
+      _pinBytes = _collectAndClearControllers();
       _verifyPin();
     }
   }
 
   Future<void> _verifyPin() async {
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     await Future.delayed(const Duration(milliseconds: 1500));
+
     try {
       final prefs = await SharedPreferences.getInstance();
-      final savedPin = prefs.getString('pin_code');
-      final correctPin = savedPin ?? "1234";
-      final reversedPin = correctPin.split('').reversed.join();
+      final storedHash = prefs.getString('pin_hash');
 
-      if (_pin == correctPin) {
+      if (storedHash == null) {
+        // No PIN hash found — redirect to setup
+        if (mounted) Navigator.pushReplacementNamed(context, '/setup-pin');
+        return;
+      }
+
+      // Hash the entered bytes for comparison — never compare plaintext
+      final enteredHash = sha256.convert(_pinBytes).toString();
+
+      // Build reversed bytes for duress-PIN check
+      final reversedBytes = Uint8List.fromList(_pinBytes.reversed.toList());
+      final reversedHash = sha256.convert(reversedBytes).toString();
+      reversedBytes.fillRange(0, reversedBytes.length, 0); // zero immediately
+
+      // Zero entered PIN bytes before branching
+      _pinBytes.fillRange(0, _pinBytes.length, 0);
+      _pinBytes = Uint8List(0);
+
+      if (enteredHash == storedHash) {
         _showSuccessAnimation();
-      } else if (_pin == reversedPin && correctPin != reversedPin) {
-        // Удаляем пароли только если PIN перевернут и не является палиндромом
+      } else if (reversedHash == storedHash) {
+        // Duress PIN (reversed digits): wipe vault
         await _deleteAllPasswords();
       } else {
         _attempts++;
@@ -134,13 +165,8 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
           _errorMessage = 'Неверный PIN-код (попытка $_attempts/3)';
           _isLoading = false;
         });
-        _shakeController.forward().then((_) {
-          _shakeController.reverse();
-        });
+        _shakeController.forward().then((_) => _shakeController.reverse());
         await Future.delayed(const Duration(milliseconds: 300));
-        for (var controller in _controllers) {
-          controller.clear();
-        }
         _focusNodes[0].requestFocus();
         if (_attempts >= 3) {
           _showBlockedDialog();
@@ -158,23 +184,16 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('token');
-      // Пытаемся удалить все пароли через API
-      final response = await http.delete(
+      await http.delete(
         Uri.parse(AppConfig.passwordsUrl),
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
+        headers: {'Authorization': 'Bearer $token'},
       );
-      // Очищаем локальное хранилище (можно оставить PIN и токен, если нужно)
-      // await prefs.clear(); // если нужно всё удалить
-      // Можно оставить только PIN и token:
-      final pin = prefs.getString('pin_code');
+      final pinHash = prefs.getString('pin_hash');
       final tkn = prefs.getString('token');
       await prefs.clear();
-      if (pin != null) await prefs.setString('pin_code', pin);
+      if (pinHash != null) await prefs.setString('pin_hash', pinHash);
       if (tkn != null) await prefs.setString('token', tkn);
       if (mounted) {
-        // Просто переходим на экран паролей без диалога
         Navigator.pushNamedAndRemoveUntil(context, '/passwords', (route) => false);
       }
     } catch (e) {
@@ -186,11 +205,10 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
   }
 
   void _showSuccessAnimation() {
-    // Прямой переход к паролям без диалога
     Navigator.pushNamedAndRemoveUntil(
-      context, 
-      '/passwords', 
-      (route) => false
+      context,
+      '/passwords',
+      (route) => false,
     );
   }
 
@@ -225,21 +243,19 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
     final available = await BiometricService.isAvailable();
     final enabled = await BiometricService.isBiometricEnabled();
     final diagnosticInfo = await BiometricService.getDiagnosticInfo();
-    
+
     setState(() {
       _biometricAvailable = available;
       _biometricEnabled = enabled;
     });
-    
-    // Выводим диагностическую информацию в консоль
+
     print('PIN Screen - Biometric Diagnostics:');
     print('  Available: $available');
     print('  Enabled: $enabled');
     print('  System Status: ${diagnosticInfo['systemStatus']}');
     print('  Can Use: ${diagnosticInfo['canUseBiometrics']}');
     print('  Available Methods: ${diagnosticInfo['availableBiometrics']}');
-    
-    // Автоматически показываем биометрическую аутентификацию, если она включена
+
     if (_biometricAvailable && _biometricEnabled) {
       _authenticateWithBiometrics();
     }
@@ -250,15 +266,14 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
       final authenticated = await BiometricService.authenticate(
         reason: 'Подтвердите свою личность для доступа к паролям',
       );
-      
+
       if (authenticated) {
         Navigator.pushNamedAndRemoveUntil(
-          context, 
-          '/passwords', 
-          (route) => false
+          context,
+          '/passwords',
+          (route) => false,
         );
       } else {
-        // Если биометрическая аутентификация не удалась, показываем сообщение
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -270,7 +285,6 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
       }
     } catch (e) {
       print('PIN Screen - Biometric authentication error: $e');
-      // Если биометрическая аутентификация не удалась, продолжаем с PIN
     }
   }
 
@@ -288,7 +302,6 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Логотип с анимацией
                   AnimatedBuilder(
                     animation: _animationController,
                     builder: (context, child) {
@@ -324,10 +337,9 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
                       );
                     },
                   ),
-                  
+
                   const SizedBox(height: 40),
-                  
-                  // Заголовок
+
                   Text(
                     'Введите PIN-код',
                     style: TextStyle(
@@ -336,9 +348,9 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
                       color: AppColors.text,
                     ),
                   ),
-                  
+
                   const SizedBox(height: 8),
-                  
+
                   const Text(
                     'Для доступа к приложению',
                     style: TextStyle(
@@ -346,10 +358,9 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
                       color: Colors.grey,
                     ),
                   ),
-                  
+
                   const SizedBox(height: 40),
-                  
-                  // Поля для PIN-кода с анимацией тряски
+
                   AnimatedBuilder(
                     animation: _shakeAnimation,
                     builder: (context, child) {
@@ -368,9 +379,9 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
                                 color: AppColors.input,
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: _focusNodes[index].hasFocus 
-                                    ? AppColors.button 
-                                    : Colors.transparent,
+                                  color: _focusNodes[index].hasFocus
+                                      ? AppColors.button
+                                      : Colors.transparent,
                                   width: 2,
                                 ),
                                 boxShadow: [
@@ -386,7 +397,7 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
                                 focusNode: _focusNodes[index],
                                 textAlign: TextAlign.center,
                                 keyboardType: TextInputType.number,
-                                obscureText: true, // Скрываем цифры
+                                obscureText: true,
                                 inputFormatters: [
                                   FilteringTextInputFormatter.digitsOnly,
                                   LengthLimitingTextInputFormatter(1),
@@ -408,10 +419,9 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
                       );
                     },
                   ),
-                  
+
                   const SizedBox(height: 24),
-                  
-                  // Сообщение об ошибке
+
                   if (_errorMessage != null)
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 300),
@@ -434,18 +444,16 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
                         ),
                       ),
                     ),
-                  
+
                   const SizedBox(height: 24),
-                  
-                  // Индикатор загрузки
+
                   if (_isLoading)
                     CircularProgressIndicator(
                       valueColor: AlwaysStoppedAnimation<Color>(AppColors.button),
                     ),
-                  
+
                   const SizedBox(height: 40),
-                  
-                  // Подсказка
+
                   const Text(
                     'Используйте PIN-код для быстрого доступа',
                     style: TextStyle(
@@ -454,8 +462,7 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
                     ),
                     textAlign: TextAlign.center,
                   ),
-                  
-                  // Кнопка биометрической аутентификации
+
                   if (_biometricAvailable && _biometricEnabled) ...[
                     const SizedBox(height: 20),
                     ElevatedButton.icon(
@@ -480,10 +487,9 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
                       ),
                     ),
                   ],
-                  
+
                   const SizedBox(height: 20),
-                  
-                  // Кнопка выхода
+
                   TextButton(
                     onPressed: () {
                       Navigator.pushReplacementNamed(context, '/login');
@@ -504,4 +510,4 @@ class _PinScreenState extends State<PinScreen> with TickerProviderStateMixin {
       ),
     );
   }
-} 
+}
