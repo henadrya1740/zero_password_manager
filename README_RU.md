@@ -14,6 +14,16 @@
 
 ---
 
+## 🎬 Демо — Превью интерфейса Flutter
+
+![Zero Password Manager Demo](assets/demo.gif)
+
+> **Процесс (Flutter app):**
+> Splash → Login → Sign Up → 2FA Setup → Ввод PIN → Хранилище паролей → Добавление → Настройки
+> + Показ тем: **Midnight Dark** · **Cyberpunk** (neon cyan/magenta) · **Glassmorphism** (blur glass cards)
+
+---
+
 # 🚀 Ключевые особенности
 
 ## ☁️ Никакого облака. Совсем.
