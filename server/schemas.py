@@ -127,6 +127,9 @@ class PasswordResponse(PasswordBase):
     notes_encrypted: Optional[str] = None
     favicon_url: Optional[str] = None
     folder_id: Optional[int] = None
+    rotation_enabled: bool = False
+    rotation_interval_days: Optional[int] = None
+    last_rotated_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -189,7 +192,7 @@ class RotationUpdate(BaseModel):
 
 class RotationDueItem(BaseModel):
     id: int
-    label: Optional[str] = None          # from encrypted_metadata if present
+    encrypted_metadata: Optional[str] = None  # client decrypts to find site name
     rotation_interval_days: Optional[int] = None
     last_rotated_at: Optional[datetime] = None
 
