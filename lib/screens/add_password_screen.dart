@@ -98,25 +98,49 @@ class _AddPasswordScreenState extends State<AddPasswordScreen> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token');
-
-      final response = await ApiService.get(
-        AppConfig.generatePasswordUrl,
-        headers: {'Authorization': 'Bearer $token'},
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        setState(() => passwordController.text = data['password']);
-      } else {
-        setState(() => errorMessage = 'Ошибка генерации пароля');
-      }
+      // Client-side password generation
+      final password = _generatePassword(24);
+      setState(() => passwordController.text = password);
     } catch (e) {
-      setState(() => errorMessage = 'Ошибка подключения к серверу');
+      setState(() => errorMessage = 'Ошибка генерации пароля');
     } finally {
       setState(() => isGeneratingPassword = false);
     }
+  }
+
+  String _generatePassword(int length) {
+    if (length < 14) length = 24;
+    
+    const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lower = 'abcdefghijklmnopqrstuvwxyz';
+    const digits = '0123456789';
+    const symbols = '!@#\$%^&*()_+-=';
+    
+    final allChars = upper + lower + digits + symbols;
+    
+    // Ensure at least one of each character type
+    final password = <String>[
+      upper[_randomInt(upper.length)],
+      lower[_randomInt(lower.length)],
+      digits[_randomInt(digits.length)],
+      symbols[_randomInt(symbols.length)],
+    ];
+    
+    // Fill the rest randomly
+    for (int i = 4; i < length; i++) {
+      password.add(allChars[_randomInt(allChars.length)]);
+    }
+    
+    // Shuffle to avoid predictable pattern
+    password.shuffle();
+    
+    return password.join();
+  }
+
+  int _randomInt(int max) {
+    // Use a simple pseudo-random generator for client-side generation
+    final now = DateTime.now().microsecondsSinceEpoch;
+    return (now % max).abs();
   }
 
   Future<void> savePassword() async {

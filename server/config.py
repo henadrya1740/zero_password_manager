@@ -35,6 +35,9 @@ class Settings:
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 30)))
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "365"))
     SEED_PHRASE_KEY: str = os.getenv("SEED_PHRASE_KEY", "fallback_seed_phrase_key_32bytes_min")
+    TOTP_MASTER_KEY: str = os.getenv("TOTP_MASTER_KEY", "dW5pcXVlX21hc3Rlcl9rZXlfMzJieXRlc19sb25nX2hlcmU=") # Default for dev
+    DEVICE_SECRET: str = os.getenv("DEVICE_SECRET", "fallback_device_secret_32bytes_min")
+    BLOCK_CLEANUP_INTERVAL_HOURS: int = int(os.getenv("BLOCK_CLEANUP_INTERVAL_HOURS", "1"))
 
     # Environment and Storage Configuration
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")

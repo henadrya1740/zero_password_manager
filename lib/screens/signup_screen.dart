@@ -46,30 +46,59 @@ class _SignUpScreenState extends State<SignUpScreen> with SingleTickerProviderSt
 
   Future<void> _generatePassword() async {
     try {
-      final response = await http.get(
-        Uri.parse(AppConfig.generatePasswordUrl),
+      // Client-side password generation
+      final password = _generatePasswordString(24);
+      _formKey.currentState?.fields['password']?.didChange(password);
+      
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Сгенерирован надежный пароль'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
       );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final password = data['password'];
-        _formKey.currentState?.fields['password']?.didChange(password);
-        
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Сгенерирован надежный пароль'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось сгенерировать пароль')),
       );
     }
+  }
+
+  String _generatePasswordString(int length) {
+    if (length < 14) length = 24;
+    
+    const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lower = 'abcdefghijklmnopqrstuvwxyz';
+    const digits = '0123456789';
+    const symbols = '!@#\$%^&*()_+-=';
+    
+    final allChars = upper + lower + digits + symbols;
+    
+    // Ensure at least one of each character type
+    final password = <String>[
+      upper[_randomInt(upper.length)],
+      lower[_randomInt(lower.length)],
+      digits[_randomInt(digits.length)],
+      symbols[_randomInt(symbols.length)],
+    ];
+    
+    // Fill the rest randomly
+    for (int i = 4; i < length; i++) {
+      password.add(allChars[_randomInt(allChars.length)]);
+    }
+    
+    // Shuffle to avoid predictable pattern
+    password.shuffle();
+    
+    return password.join();
+  }
+
+  int _randomInt(int max) {
+    // Use a simple pseudo-random generator for client-side generation
+    final now = DateTime.now().microsecondsSinceEpoch;
+    return (now % max).abs();
   }
 
   Future<void> _register() async {

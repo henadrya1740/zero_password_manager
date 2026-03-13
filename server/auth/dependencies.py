@@ -40,6 +40,9 @@ def get_current_user(
     if not user:
         raise InvalidCredentials()
 
+    if payload.get("token_version") != user.token_version:
+        raise InvalidCredentials()
+
     return user
 
 

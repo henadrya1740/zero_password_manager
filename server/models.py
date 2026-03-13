@@ -1,7 +1,9 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON, DateTime, LargeBinary
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from .database import Base
+import uuid
 
 class User(Base):
     __tablename__ = "users"
@@ -23,6 +25,7 @@ class User(Base):
     last_login_attempt = Column(DateTime(timezone=True), nullable=True)
     seed_phrase_encrypted = Column(String, nullable=True)
     seed_phrase_last_viewed_at = Column(DateTime(timezone=True), nullable=True)
+    token_version = Column(Integer, default=0, nullable=False)
 
     history = relationship("PasswordHistory", back_populates="user")
     passwords = relationship("Password", back_populates="owner")
@@ -127,3 +130,57 @@ class Audit(Base):
     meta = Column(JSON)
     ip_address = Column(String)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token_hash = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked = Column(Boolean, default=False)
+    device_id = Column(String)
+    user = relationship("User")
+
+class IPBlock(Base):
+    __tablename__ = "ip_blocks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ip = Column(String, index=True, nullable=False)
+    until = Column(DateTime(timezone=True), nullable=False)
+    reason = Column(String, nullable=True) # e.g. "Brute force", "Scanner detected"
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class FailedAttempt(Base):
+    __tablename__ = "failed_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ip = Column(String, index=True, nullable=False)
+    count = Column(Integer, default=0)
+    last_attempt = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class UsedOTP(Base):
+    __tablename__ = "used_otps"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    otp = Column(String, nullable=False)
+    used_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User")
+
+
+class SecurityEvent(Base):
+    __tablename__ = "security_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    type = Column(String, index=True)
+    details = Column(JSON)
+    ip = Column(String)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User")

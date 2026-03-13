@@ -41,6 +41,7 @@ from .database import engine, get_db
 import logging
 from .utils import get_favicon_url, get_client_ip, EncryptionService
 from .auth.dependencies import get_current_user, get_seed_access_user
+from .middleware import SecurityMiddleware
 
 # Centralized Logging
 logging.basicConfig(level=logging.INFO)
@@ -86,6 +87,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
+
+# Security Middleware (Should be early)
+app.add_middleware(SecurityMiddleware)
 
 app.include_router(auth_router)  # Compatibility with legacy/root routes
 app.include_router(auth_router, prefix="/api/v1")
@@ -485,34 +489,6 @@ def log_password_history(request: Request,
     return crud.create_history(db, history, user_id=current_user.id)
 
 
-@app.get("/api/generate-password")
-@limiter.limit("10/minute")
-def generate_password(request: Request, length: int = 24):
-    if length < 14:
-        length = 24
-    
-    # Categories of characters to ensure variety
-    upper = string.ascii_uppercase
-    lower = string.ascii_lowercase
-    digits = string.digits
-    symbols = "!@#$%^&*()_+-="
-    
-    # Start with one of each to guarantee strength check passes
-    password = [
-        secrets.choice(upper),
-        secrets.choice(lower),
-        secrets.choice(digits),
-        secrets.choice(symbols)
-    ]
-    
-    # Fill the rest randomly
-    all_chars = upper + lower + digits + symbols
-    password += [secrets.choice(all_chars) for _ in range(length - 4)]
-    
-    # Shuffle to avoid predictable pattern
-    random.shuffle(password)
-    
-    return {"password": "".join(password)}
 
 
 @app.post("/admin/request-backend-change")

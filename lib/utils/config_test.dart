@@ -12,7 +12,6 @@ class ConfigTest {
     print('Login: ${AppConfig.loginUrl}');
     print('Register: ${AppConfig.registerUrl}');
     print('Passwords: ${AppConfig.passwordsUrl}');
-    print('Generate Password: ${AppConfig.generatePasswordUrl}');
     print('Import Passwords: ${AppConfig.importPasswordsUrl}');
     print('========================');
   }

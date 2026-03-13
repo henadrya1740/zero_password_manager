@@ -6,3 +6,9 @@ ARGON2_HASH_LEN    = 32
 
 # AES-256-GCM
 AES_NONCE_LEN = 12  # 96-bit nonce
+
+# ── Security Constants ────────────────────────────────────────────────────────
+
+MAX_EXECUTION_TIME = 2.0  # seconds
+MAX_FAILED_OTP_ATTEMPTS = 5
+LOCKOUT_TIME_MINUTES = 15

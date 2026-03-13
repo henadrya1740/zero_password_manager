@@ -226,13 +226,9 @@ class ThemedBackground extends StatelessWidget {
             child: Image.asset(
               backgroundImage,
               fit: BoxFit.cover,
-              colorFilter:
-                  theme.backgroundGradient != null
-                      ? ColorFilter.mode(
-                        theme.background.withOpacity(0.3),
-                        BlendMode.overlay,
-                      )
-                      : null,
+              color: theme.backgroundGradient != null
+                  ? theme.background.withOpacity(0.3)
+                  : null,
             ),
           ),
           // Градиентный оверлей

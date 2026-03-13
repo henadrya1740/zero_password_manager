@@ -51,7 +51,6 @@ class AppConfig {
   static String get setup2faUrl => '$apiUrl/api/v1/setup_2fa';
   static String get confirm2faUrl => '$apiUrl/api/v1/confirm_2fa';
   static String get passwordsUrl => '$apiUrl/passwords';
-  static String get generatePasswordUrl => '$apiUrl/api/generate-password';
   static String get importPasswordsUrl => '$apiUrl/import-passwords';
   static String get updateFaviconsUrl => '$apiUrl/update-favicons';
   static String get passwordHistoryUrl => '$apiUrl/password-history';
