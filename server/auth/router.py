@@ -199,7 +199,7 @@ async def login_phase1(
         otp_required = user.totp_enabled and "login" in settings.PERMISSIONS_OTP_LIST
         
         if otp_required:
-            device_id = generate_device_id(request)
+            device_id = generate_device_id(request, body.device_info)
             mfa_token = create_mfa_token(user.id, device_id)
             response = LoginPhase1Response(
                 requires_mfa=True,
@@ -207,7 +207,7 @@ async def login_phase1(
                 salt=user.salt
             )
         else:
-            device_id = generate_device_id(request)
+            device_id = generate_device_id(request, body.device_info)
             access_token = create_access_token(user, device_id)
             refresh_token = create_refresh_token(db, user.id, device_id)
             

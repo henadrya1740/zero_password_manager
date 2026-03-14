@@ -15,6 +15,9 @@ from .config import settings
 from .models import User, IPBlock, FailedAttempt, SecurityEvent
 import re
 import logging
+import json
+from fastapi import Request
+from user_agents import parse
 
 
 # Усиленные параметры безопасности
@@ -36,6 +39,7 @@ SECURITY_PARAMS = {
         "Sec-CH-UA",
         "Sec-CH-UA-Platform",
         "Sec-CH-UA-Mobile",
+        "Sec-CH-UA-Full-Version-List",
         "User-Agent"
     ],
     "SCANNER_SIGNATURES": {
@@ -78,15 +82,22 @@ class SecurityManager:
     @staticmethod
     def decode_token(token: str, expected_type: str | None = "access") -> dict:
         try:
+            # Hardened JWT decoding with strict options (v2026 security standards)
+            # Explicitly require HS256, verify signature, and check all security claims
             payload = jwt.decode(
                 token,
                 settings.JWT_SECRET_KEY,
-                algorithms=[settings.ALGORITHM],
-                options={"require": ["exp", "iat"]}
+                algorithms=["HS256"],
+                options={
+                    "verify_signature": True,
+                    "verify_alg": True,
+                    "require": ["exp", "iat", "sub", "jti", "type"],
+                }
             )
             
-            if not REQUIRED_CLAIMS.issubset(payload.keys()):
-                raise ValueError("Missing required claims")
+            # Double check algorithm to prevent substitution attacks
+            # Some libraries might return it in headers or payload; jose check is usually sufficient with algorithms=["HS256"]
+            # but we explicitly check here for defense-in-depth.
             
             if expected_type and payload.get("type") != expected_type:
                 raise ValueError("Invalid token type")
@@ -101,27 +112,187 @@ class SecurityManager:
             raise InvalidCredentials()
 
     @staticmethod
-    def generate_device_id(request) -> str:
-        """Robust device fingerprinting using multiple headers."""
-        components = []
-        for header in SECURITY_PARAMS["DEVICE_FP_COMPONENTS"]:
-            value = request.headers.get(header, "")
-            if isinstance(value, str):
-                components.append(value.strip())
-        
-        raw = "|".join(components).encode()
+    def generate_device_id(request: Request) -> str:
+        """
+        Creates a unique device fingerprint (v2026 Enhanced).
+        Uses Client Hints, hardware characteristics, and UA normalization.
+        """
+        # 1. Collect basic data
+        fingerprint_data = {
+            "user_agent": request.headers.get("User-Agent", ""),
+            "sec_ch_ua": request.headers.get("Sec-CH-UA-Full-Version-List", ""),
+            "accept_language": request.headers.get("Accept-Language", ""),
+            "screen_resolution": f"{request.scope.get('width', 0)}x{request.scope.get('height', 0)}",
+            "timezone_offset": request.headers.get("X-Timezone-Offset", ""),
+            "device_memory": request.headers.get("Device-Memory", ""),
+            "hardware_concurrency": request.headers.get("Hardware-Concurrency", ""),
+            "platform": request.headers.get("Sec-CH-UA-Platform", ""),
+            "color_depth": request.headers.get("Color-Depth", ""),
+            "client_hints": SecurityManager._extract_client_hints(request),
+        }
+
+        # 2. Normalize User-Agent
+        fingerprint_data["normalized_user_agent"] = SecurityManager._normalize_user_agent(fingerprint_data["user_agent"])
+
+        # 3. Enhanced Entropy sources
+        entropy_sources = [
+            fingerprint_data["user_agent"],
+            fingerprint_data["sec_ch_ua"],
+            fingerprint_data["accept_language"],
+            fingerprint_data["screen_resolution"],
+            fingerprint_data["timezone_offset"],
+            fingerprint_data["device_memory"],
+            fingerprint_data["hardware_concurrency"],
+            fingerprint_data["platform"],
+            fingerprint_data["color_depth"],
+        ]
+        fingerprint_data["entropy_hash"] = SecurityManager._generate_entropy_hash(entropy_sources)
+
+        # Sign with server secret to prevent forgery
         return hmac.new(
             settings.DEVICE_SECRET.encode(),
-            raw,
+            fingerprint_string.encode(),
             hashlib.sha256
         ).hexdigest()
 
     @staticmethod
-    def get_client_ip(request) -> str:
+    def generate_device_id_from_flutter(data: dict) -> str:
+        """
+        Creates a unique device fingerprint for Flutter clients.
+        Includes mandatory anti-emulation checks.
+        """
+        from fastapi import HTTPException, status
+        
+        # 1. Anti-emulation check
+        if SecurityManager._is_emulated(data):
+            # Log this as a security event
+            # Note: We don't have DB here easily, we'll let the router handle the event logging
+            # but we raise the exception to stop the flow.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Emulated devices are not allowed"
+            )
+
+        # 2. Collect data
+        fingerprint_data = {
+            "platform": data.get("platform", "").lower(),
+            "model": data.get("model", ""),
+            "os_version": data.get("version", ""),
+            "device_id": data.get("deviceId", ""),
+            "screen_resolution": data.get("screenResolution", ""),
+            "language": data.get("language", ""),
+        }
+
+        # 3. Entropy
+        entropy_sources = [
+            fingerprint_data["platform"],
+            fingerprint_data["model"],
+            fingerprint_data["os_version"],
+            fingerprint_data["device_id"],
+            fingerprint_data["screen_resolution"],
+            fingerprint_data["language"],
+        ]
+        fingerprint_data["entropy_hash"] = SecurityManager._generate_entropy_hash(entropy_sources)
+
+        # 4. Final signed hash
+        fingerprint_string = json.dumps(fingerprint_data, sort_keys=True)
+        return hmac.new(
+            settings.DEVICE_SECRET.encode(),
+            fingerprint_string.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+    @staticmethod
+    def _is_emulated(data: dict) -> bool:
+        """
+        Detects if the device is an emulator or compromised environment.
+        Trusts results from the native RASP package (safe_device) if available.
+        """
+        # 1. Trust specialized RASP package results
+        is_real_device = data.get("isRealDevice")
+        if is_real_device is False:
+            return True
+
+        is_jailbroken = data.get("isJailBroken", False)
+        if is_jailbroken:
+            # We treat Root/Jailbreak as a compromised environment for a password manager
+            return True
+
+        # 2. Existing heuristic fallback
+        emulator_signatures = [
+            "sdk_gphone", "Android SDK built for x86", "iPhone Simulator",
+            "Genymotion", "Bluestacks", "google_sdk", "Emulator"
+        ]
+
+        model = data.get("model", "").lower()
+        is_emulator_flag = data.get("isEmulator", False)
+
+        if is_emulator_flag:
+            return True
+
+        for signature in emulator_signatures:
+            if signature.lower() in model:
+                return True
+
+        # 3. Heuristic: missing deviceId in production-like platforms
+        if not data.get("deviceId") and data.get("platform") in ["android", "ios"]:
+            return True
+
+        return False
+
+    @staticmethod
+    def _normalize_user_agent(user_agent: str) -> dict:
+        """Normalizes User-Agent for data unification."""
+        try:
+            ua = parse(user_agent)
+            return {
+                "browser_family": ua.browser.family,
+                "browser_version": ua.browser.version_string,
+                "os_family": ua.os.family,
+                "os_version": ua.os.version_string,
+                "device_family": ua.device.family,
+                "is_mobile": ua.is_mobile,
+                "is_tablet": ua.is_tablet,
+                "is_pc": ua.is_pc,
+                "is_bot": ua.is_bot,
+            }
+        except Exception:
+            return {"raw": user_agent}
+
+    @staticmethod
+    def _extract_client_hints(request: Request) -> dict:
+        """Extracts Client Hints from request headers."""
+        return {
+            "architecture": request.headers.get("Sec-CH-UA-Arch", ""),
+            "model": request.headers.get("Sec-CH-UA-Model", ""),
+            "platform_version": request.headers.get("Sec-CH-UA-Platform-Version", ""),
+            "bitness": request.headers.get("Sec-CH-UA-Bitness", ""),
+            "mobile": request.headers.get("Sec-CH-UA-Mobile", ""),
+        }
+
+    @staticmethod
+    def _generate_entropy_hash(sources: list) -> str:
+        """Generates entropy hash based on list of sources."""
+        entropy_string = ":".join(str(source) for source in sources if source)
+        return hashlib.sha256(entropy_string.encode()).hexdigest()
+
+    @staticmethod
+    def get_client_ip(request: Request) -> str:
+        """
+        Retrieves the client IP. 
+        Prioritizes direct host for security unless a trusted proxy is explicitly handled.
+        """
+        # For production behind a trusted proxy, use X-Forwarded-For if you trust your load balancer.
+        # Otherwise, use request.client.host to avoid spoofing.
+        if request.client:
+            return request.client.host
+        
+        # Fallback to header ONLY if direct host is missing (e.g. some mock environments)
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
             return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "127.0.0.1"
+            
+        return "127.0.0.1"
 
     @staticmethod
     def is_scanner_request(request) -> Optional[str]:

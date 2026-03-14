@@ -53,3 +53,30 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             db.close()
             
         return await call_next(request)
+
+class ProxyHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to handle Trusted Proxies.
+    Prevents IP spoofing by validating X-Forwarded-For headers.
+    """
+    async def dispatch(self, request: Request, call_next):
+        # List of trusted proxies (e.g., local nginx, docker network, or Cloudflare IPs)
+        # In a real production environment, this should be moved to settings.
+        trusted_proxies = {"127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
+        
+        forwarded_for = request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            # The client IP is the first entry in X-Forwarded-For
+            client_ip = forwarded_for.split(",")[0].strip()
+            
+            # Verify if the immediate requester IP is a trusted proxy
+            # If request.client is None (e.g. test client), we might skip or assume trusted in dev
+            requester_ip = request.client.host if request.client else "127.0.0.1"
+            
+            if requester_ip in trusted_proxies:
+                # Rewrite the client in scope so request.client.host returns the real client IP
+                request.scope["client"] = (client_ip, request.client.port if request.client else 0)
+            else:
+                logger.warning(f"Untrusted proxy header detected from {requester_ip}. Header ignored.")
+                
+        return await call_next(request)

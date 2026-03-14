@@ -54,6 +54,7 @@ dependencies:
   device_info_plus: ^10.0.0
   flutter_local_notifications: ^18.0.1
   web_socket_channel: ^3.0.3
+  safe_device: ^1.1.4
 
 dev_dependencies:
   flutter_test:

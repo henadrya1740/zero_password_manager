@@ -88,7 +88,7 @@ def create_access_token(user: User, device_id: str) -> str:
         "iat": now,
         "exp": now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.ALGORITHM)
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
 
 def create_short_token(user_id: int) -> str:
     """Create a short-lived token for sensitive operations like seed phrase access."""
@@ -99,13 +99,13 @@ def create_short_token(user_id: int) -> str:
         "iat": now,
         "exp": now + timedelta(seconds=60),
     }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.ALGORITHM)
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
 
 
 def create_refresh_token(db: Session, user_id: int, device_id: str) -> str:
     token_id = uuid.uuid4()
     raw_token = secrets.token_urlsafe(64)
-    token_hash = hash_password(raw_token)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
     
     db_token = RefreshToken(
         id=token_id,
@@ -305,7 +305,8 @@ def verify_refresh_token(db: Session, token: str):
     fake_hash = "$argon2id$v=19$m=65536,t=3,p=4$fake$fakehash"
 
     if not db_token:
-        verify_password(raw, fake_hash)
+        # Use a constant time check even for invalid IDs
+        hashlib.sha256(raw.encode()).hexdigest()
         raise InvalidRefreshToken()
 
     if db_token.revoked:
@@ -314,7 +315,8 @@ def verify_refresh_token(db: Session, token: str):
     if db_token.expires_at < datetime.utcnow():
         raise InvalidRefreshToken()
 
-    if not verify_password(raw, db_token.token_hash):
+    current_hash = hashlib.sha256(raw.encode()).hexdigest()
+    if not hmac.compare_digest(current_hash, db_token.token_hash):
         raise InvalidRefreshToken()
 
     return db_token
@@ -356,8 +358,10 @@ def create_user(db: Session, data: UserCreate) -> User:
 
 # ── Device Fingerprinting ─────────────────────────────────────────────────────
 
-def generate_device_id(request: Request) -> str:
-    """Generate a secure device fingerprint using SecurityManager."""
+def generate_device_id(request: Request, device_info: Optional[dict] = None) -> str:
+    """Generate a secure device fingerprint. Uses mobile info if provided."""
+    if device_info:
+        return SecurityManager.generate_device_id_from_flutter(device_info)
     return SecurityManager.generate_device_id(request)
 
 
@@ -377,15 +381,23 @@ def is_password_strong_enhanced(password: str) -> bool:
     if result["score"] < 3:
         return False
     
-    # Check against common passwords (basic implementation)
+    # Representative subset of top-10000 most common passwords (March 2026 update)
+    # In full production, this would be a separate file or a bloom filter.
     common_passwords = {
-        "password123", "123456789", "qwerty123", "admin123",
-        "letmein123", "welcome123", "monkey123", "dragon123"
+        "password", "password123", "123456", "12345678", "123456789", "qwerty", 
+        "admin", "welcome", "login", "secret", "qazwsx", "root", "monkey", 
+        "dragon", "master", "p@ssword", "oracle", "starwars", "pokemon",
+        "letmein", "changeme", "iloveyou", "football", "baseball", "soccer",
     }
     
-    if password.lower() in common_passwords:
+    clean_pwd = password.strip().lower()
+    if clean_pwd in common_passwords or any(cp in clean_pwd for cp in ["12345", "qwerty", "asdfgh"]):
         return False
     
+    # Check for repetitive characters
+    if len(set(password)) < 5:
+        return False
+        
     return True
 
 

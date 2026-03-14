@@ -13,6 +13,7 @@ import '../utils/passkey_service.dart';
 import '../services/vault_service.dart';
 import '../models/server_error.dart';
 import '../utils/form_error_handler.dart';
+import '../utils/security_utils.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -57,12 +58,17 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     final values = _formKey.currentState!.value;
     final login = values['login'];
     final password = values['password'];
+    final devicePayload = await SecurityUtils.getDeviceSecurityPayload();
 
     try {
       final response = await http.post(
         Uri.parse(AppConfig.loginUrl),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({'login': login, 'password': password}),
+        body: json.encode({
+          'login': login, 
+          'password': password,
+          'device_info': devicePayload,
+        }),
       );
 
       if (response.statusCode == 200) {
@@ -107,11 +113,17 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
   Future<void> _loginWithOTP(String login, String password, String otp) async {
     setState(() => _isLoading = true);
+    final devicePayload = await SecurityUtils.getDeviceSecurityPayload();
+    
     try {
       final response = await http.post(
         Uri.parse(AppConfig.loginUrl),
         headers: {'Content-Type': 'application/json', 'X-OTP': otp},
-        body: json.encode({'login': login, 'password': password}),
+        body: json.encode({
+          'login': login, 
+          'password': password,
+          'device_info': devicePayload,
+        }),
       );
 
       if (response.statusCode == 200) {

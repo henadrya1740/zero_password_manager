@@ -32,7 +32,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
-from . import auth_legacy as auth, crud, models, schemas
+from . import models, schemas, crud
+from .auth import service as auth_service, dependencies as auth_deps
 from .exceptions import AppException, app_exception_handler
 from .auth.router import router as auth_router
 from .auth.service import verify_hardened_otp
@@ -41,7 +42,7 @@ from .database import engine, get_db
 import logging
 from .utils import get_favicon_url, get_client_ip, EncryptionService
 from .auth.dependencies import get_current_user, get_seed_access_user
-from .middleware import SecurityMiddleware
+from .middleware import SecurityMiddleware, ProxyHeadersMiddleware
 
 # Centralized Logging
 logging.basicConfig(level=logging.INFO)
@@ -60,16 +61,6 @@ def validate_base64(data: str) -> bool:
 # Initialize database
 models.Base.metadata.create_all(bind=engine)
 
-# Startup Security Check
-if settings.JWT_SECRET_KEY == "fallback_secret_key_for_development_only":
-    if settings.ENVIRONMENT == "production":
-        logger.critical("SECURITY BREACH: JWT_SECRET_KEY must be configured in production! Shutting down.")
-        raise RuntimeError("JWT_SECRET_KEY check failed")
-    else:
-        logger.warning("Using development fallback for JWT_SECRET_KEY. DO NOT USE IN PRODUCTION.")
-
-if not settings.TELEGRAM_BOT_TOKEN and settings.ENVIRONMENT == "production":
-    logger.warning("Production mode lacks TELEGRAM_BOT_TOKEN. Security alerts will not be sent.")
 
 # Setup Rate Limiter
 limiter = Limiter(key_func=get_remote_address)
@@ -78,17 +69,27 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_exception_handler(AppException, app_exception_handler)
 
-# CORS and Security Headers
-cors_regex = r"https?:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+|.*)(:\d+)?"
+# CORS and Security Hardening
+# In production, restrict to actual domain
+cors_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+if settings.ENVIRONMENT == "production":
+    # Replace with your actual production domain
+    cors_origins = [settings.EXPECTED_ORIGIN]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=cors_regex,
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type", "X-OTP", "X-Requested-With"],
+    expose_headers=["X-Total-Count"],
 )
 
 # Security Middleware (Should be early)
+app.add_middleware(ProxyHeadersMiddleware)
 app.add_middleware(SecurityMiddleware)
 
 app.include_router(auth_router)  # Compatibility with legacy/root routes
@@ -97,12 +98,37 @@ app.include_router(auth_router, prefix="/api/v1")
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
+    """Injects high-security HTTP headers for protection against XSS, Clickjacking, and Sniffing."""
     response = await call_next(request)
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Strict-Transport-Security"] = (
-        "max-age=63072000; includeSubDomains"
+    
+    # HSTS: Strict Transport Security (Force HTTPS) - 1 year
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    
+    # CSP: Content Security Policy
+    # default-src 'self' prevents loading resources from other domains
+    # img-src 'self' data: allows local images and base64 (favicons)
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https://www.google.com; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "object-src 'none'"
     )
+    
+    # Prevent Content-Type Sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    
+    # Clickjacking Protection
+    response.headers["X-Frame-Options"] = "DENY"
+    
+    # XSS Protection (Traditional but still useful as defense-in-depth)
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    
+    # Referrer Policy
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    
     return response
 
 
@@ -133,7 +159,7 @@ manager = ConnectionManager()
 @app.websocket("/ws/device-events")
 async def websocket_device_events(websocket: WebSocket, token: str):
     try:
-        payload = auth.jwt.decode(token, auth.SECRET_KEY, algorithms=[auth.ALGORITHM])
+        payload = auth_service.decode_token(token)
         user_id = int(payload.get("sub"))
     except Exception:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -147,7 +173,7 @@ async def websocket_device_events(websocket: WebSocket, token: str):
         manager.disconnect(user_id)
 
 @app.get("/profile", response_model=schemas.UserResponse)
-def get_profile(current_user: models.User = Depends(auth.get_current_user)):
+def get_profile(current_user: models.User = Depends(auth_deps.get_current_user)):
     """Get current user profile info."""
     # We need to explicitly set the password_count since it's not in the DB model directly
     # as a simple column but we want it in the response.
@@ -162,7 +188,7 @@ def get_profile(current_user: models.User = Depends(auth.get_current_user)):
 def update_profile(request: Request,
                    background_tasks: BackgroundTasks,
                    user_update: schemas.ProfileUpdate,
-                   current_user: models.User = Depends(auth.get_current_user),
+                   current_user: models.User = Depends(auth_deps.get_current_user),
                    db: Session = Depends(get_db)):
     """Update profile settings like Telegram Chat ID. Requires TOTP if enabled."""
     
@@ -181,7 +207,7 @@ def update_profile(request: Request,
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Password too weak. Minimum 14 characters, including uppercase, lowercase, digits, and special symbols."
             )
-        current_user.hashed_password = auth.get_password_hash(user_update.password)
+        current_user.hashed_password = auth_service.hash_password(user_update.password)
         
     db.commit()
     db.refresh(current_user)
@@ -218,7 +244,7 @@ def get_seed_phrase(
 def set_seed_phrase(
     request: Request,
     body: dict,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth_deps.get_current_user),
     db: Session = Depends(get_db)
 ):
     """Set or rotate the seed phrase. Rotation requires multi-factor proof."""
@@ -249,25 +275,18 @@ def refresh_token(request: Request, payload: dict, background_tasks: BackgroundT
         raise HTTPException(status_code=400, detail="Refresh token missing")
 
     try:
-        data = auth.jwt.decode(token, auth.SECRET_KEY,
-                              algorithms=[auth.ALGORITHM])
-        if data.get("type") != "refresh":
-            crud.audit_event(db, data.get("sub"), "refresh_token_failed", {"reason": "invalid_token_type"}, ip=request.client.host, background_tasks=background_tasks)
-            raise HTTPException(status_code=401, detail="Invalid token type")
-        user_id = data.get("sub")
-    except Exception:
-        crud.audit_event(db, None, "refresh_token_failed", {"reason": "invalid_token"}, ip=request.client.host, background_tasks=background_tasks)
+        new_access, new_refresh = auth_service.rotate_refresh_token(db, token)
+        crud.audit_event(db, None, "token_refreshed", ip=request.client.host, background_tasks=background_tasks)
+        return {"access_token": new_access, "refresh_token": new_refresh, "token_type": "bearer"}
+    except Exception as e:
+        crud.audit_event(db, None, "refresh_token_failed", {"reason": str(e)}, ip=request.client.host, background_tasks=background_tasks)
         raise HTTPException(status_code=401, detail="Invalid refresh token")
-
-    new_access_token = auth.create_access_token(data={"sub": user_id})
-    crud.audit_event(db, user_id, "token_refreshed", ip=request.client.host, background_tasks=background_tasks)
-    return {"access_token": new_access_token, "token_type": "bearer"}
 
 
 @app.get("/passwords", response_model=List[schemas.PasswordResponse])
 @limiter.limit("60/minute")
 def read_passwords(request: Request,
-                   current_user: models.User = Depends(auth.get_current_user),
+                   current_user: models.User = Depends(auth_deps.get_current_user),
                    db: Session = Depends(get_db),
                    background_tasks: BackgroundTasks = BackgroundTasks()):
     # OTP-Gated if configured
@@ -294,7 +313,7 @@ def read_passwords(request: Request,
 def create_password(request: Request,
                     password: schemas.PasswordCreate,
                     background_tasks: BackgroundTasks,
-                    current_user: models.User = Depends(auth.get_current_user),
+                    current_user: models.User = Depends(auth_deps.get_current_user),
                     db: Session = Depends(get_db)):
     # OTP-Gated if configured
     if "vault_write" in settings.PERMISSIONS_OTP_LIST:
@@ -329,7 +348,7 @@ def create_password(request: Request,
 def import_passwords(request: Request,
                     data: schemas.PasswordImport,
                     background_tasks: BackgroundTasks,
-                    current_user: models.User = Depends(auth.get_current_user),
+                    current_user: models.User = Depends(auth_deps.get_current_user),
                     db: Session = Depends(get_db)):
     # OTP-Gated if configured
     if "vault_write" in settings.PERMISSIONS_OTP_LIST:
@@ -349,7 +368,7 @@ def update_password(request: Request,
                     password_id: int,
                     password: schemas.PasswordUpdate,
                     background_tasks: BackgroundTasks,
-                    current_user: models.User = Depends(auth.get_current_user),
+                    current_user: models.User = Depends(auth_deps.get_current_user),
                     db: Session = Depends(get_db)):
     # OTP-Gated if configured
     if "vault_write" in settings.PERMISSIONS_OTP_LIST:
@@ -373,7 +392,7 @@ def update_password(request: Request,
 def delete_password(request: Request,
                     password_id: int,
                     background_tasks: BackgroundTasks,
-                    current_user: models.User = Depends(auth.get_current_user),
+                    current_user: models.User = Depends(auth_deps.get_current_user),
                     db: Session = Depends(get_db)):
     # OTP-Gated if configured
     if "vault_write" in settings.PERMISSIONS_OTP_LIST:
@@ -386,16 +405,18 @@ def delete_password(request: Request,
 # ── Folder Endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/folders", response_model=List[schemas.FolderResponse])
-def read_folders(current_user: models.User = Depends(auth.get_current_user),
+@limiter.limit("30/minute")
+def read_folders(current_user: models.User = Depends(auth_deps.get_current_user),
                  db: Session = Depends(get_db)):
     return crud.get_folders(db, user_id=current_user.id)
 
 
 @app.post("/folders", response_model=schemas.FolderResponse)
+@limiter.limit("10/minute")
 def create_folder(request: Request,
                   folder: schemas.FolderCreate,
                   background_tasks: BackgroundTasks,
-                  current_user: models.User = Depends(auth.get_current_user),
+                  current_user: models.User = Depends(auth_deps.get_current_user),
                   db: Session = Depends(get_db)):
     # OTP-Gated if configured
     if "vault_write" in settings.PERMISSIONS_OTP_LIST:
@@ -404,9 +425,10 @@ def create_folder(request: Request,
 
 
 @app.put("/folders/{folder_id}", response_model=schemas.FolderResponse)
+@limiter.limit("10/minute")
 def update_folder(folder_id: int,
                   folder: schemas.FolderUpdate,
-                  current_user: models.User = Depends(auth.get_current_user),
+                  current_user: models.User = Depends(auth_deps.get_current_user),
                   db: Session = Depends(get_db)):
     db_folder = crud.update_folder(db, folder_id=folder_id, folder=folder, user_id=current_user.id)
     count = db.query(models.Password).filter(models.Password.folder_id == folder_id).count()
@@ -422,17 +444,19 @@ def update_folder(folder_id: int,
 
 
 @app.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("10/minute")
 def delete_folder(folder_id: int,
-                  current_user: models.User = Depends(auth.get_current_user),
+                  current_user: models.User = Depends(auth_deps.get_current_user),
                   db: Session = Depends(get_db)):
     crud.delete_folder(db, folder_id=folder_id, user_id=current_user.id)
 
 
 @app.get("/folders/{folder_id}/passwords", response_model=List[schemas.PasswordResponse])
+@limiter.limit("30/minute")
 def read_passwords_by_folder(request: Request,
                              folder_id: int,
                              background_tasks: BackgroundTasks,
-                             current_user: models.User = Depends(auth.get_current_user),
+                             current_user: models.User = Depends(auth_deps.get_current_user),
                              db: Session = Depends(get_db)):
     # OTP-Gated if configured
     if "vault_read" in settings.PERMISSIONS_OTP_LIST:
@@ -447,9 +471,10 @@ def read_passwords_by_folder(request: Request,
 
 
 @app.get("/audit", response_model=List[schemas.AuditResponse])
+@limiter.limit("10/minute")
 def read_audit_logs(request: Request,
                     background_tasks: BackgroundTasks,
-                    current_user: models.User = Depends(auth.get_current_user),
+                    current_user: models.User = Depends(auth_deps.get_current_user),
                     db: Session = Depends(get_db)):
     # OTP-Gated if configured
     if "audit_read" in settings.PERMISSIONS_OTP_LIST:
@@ -458,9 +483,10 @@ def read_audit_logs(request: Request,
 
 
 @app.get("/password-history", response_model=List[schemas.HistoryResponse])
+@limiter.limit("10/minute")
 def read_password_history(request: Request,
                           background_tasks: BackgroundTasks,
-                          current_user: models.User = Depends(auth.get_current_user),
+                          current_user: models.User = Depends(auth_deps.get_current_user),
                           db: Session = Depends(get_db)):
     # OTP-Gated if configured
     if "history_read" in settings.PERMISSIONS_OTP_LIST:
@@ -477,10 +503,11 @@ def read_password_history(request: Request,
 
 
 @app.post("/password-history", response_model=schemas.HistoryResponse)
+@limiter.limit("20/minute")
 def log_password_history(request: Request,
                         history: schemas.HistoryCreate,
                         background_tasks: BackgroundTasks,
-                        current_user: models.User = Depends(auth.get_current_user),
+                        current_user: models.User = Depends(auth_deps.get_current_user),
                         db: Session = Depends(get_db)):
     # OTP-Gated if configured
     if "vault_write" in settings.PERMISSIONS_OTP_LIST:
@@ -492,11 +519,12 @@ def log_password_history(request: Request,
 
 
 @app.post("/admin/request-backend-change")
+@limiter.limit("5/minute")
 def request_backend_change(
     request: Request,
     new_url: str,
     background_tasks: BackgroundTasks,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth_deps.get_current_user),
     db: Session = Depends(get_db)
 ):
     challenge_id = secrets.token_hex(16)
@@ -513,11 +541,12 @@ def request_backend_change(
 
 
 @app.post("/device/confirm-backend-change")
+@limiter.limit("5/minute")
 def confirm_backend_change(
     request: Request,
     payload: dict,
     background_tasks: BackgroundTasks,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth_deps.get_current_user),
     db: Session = Depends(get_db)
 ):
     challenge_id = payload.get("challenge_id")
@@ -542,7 +571,7 @@ def confirm_backend_change(
 async def webauthn_register_options(
     request: Request,
     options_data: schemas.WebAuthnOptionsRequest,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth_deps.get_current_user),
     db: Session = Depends(get_db)
 ):
     host = request.headers.get("host", "localhost")
@@ -573,7 +602,7 @@ async def webauthn_register_options(
 async def webauthn_register_verify(
     request: Request,
     verify_data: schemas.WebAuthnRegistrationVerify,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth_deps.get_current_user),
     db: Session = Depends(get_db)
 ):
     host = request.headers.get("host", "localhost")
@@ -712,8 +741,8 @@ async def webauthn_login_verify(
         db.commit()
 
         # Issue tokens (sub must be stringified user.id for auth.get_current_user)
-        access_token = auth.create_access_token(data={"sub": str(user.id)})
-        refresh_token = auth.create_refresh_token(user_id=user.id)
+        access_token = auth_service.create_access_token(user, verify_data.device_id)
+        refresh_token = auth_service.create_refresh_token(db, user.id, verify_data.device_id)
         
         # Delete challenge
         crud.delete_challenge(db, challenge_data.challenge)
@@ -736,7 +765,7 @@ async def webauthn_login_verify(
 
 @app.get("/webauthn/devices", response_model=List[schemas.DeviceResponse])
 async def list_devices(
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth_deps.get_current_user),
     db: Session = Depends(get_db)
 ):
     return crud.get_user_devices(db, current_user.id)
@@ -746,7 +775,7 @@ async def list_devices(
 async def revoke_device_endpoint(
     device_id: int,
     background_tasks: BackgroundTasks,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth_deps.get_current_user),
     db: Session = Depends(get_db)
 ):
     crud.revoke_device(db, device_id, current_user.id)

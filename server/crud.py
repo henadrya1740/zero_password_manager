@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse
 import httpx
 import secrets
 import re
@@ -7,8 +8,10 @@ import ipaddress
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from fastapi import BackgroundTasks, HTTPException, status
-from . import models, schemas, auth_legacy as auth
+from . import models, schemas
+from .auth import service as auth
 from .config import settings
+from .database import SessionLocal
 
 async def send_telegram_message(chat_id: str, text: str):
     """Sends a security alert to Telegram (background task)."""
@@ -25,7 +28,7 @@ async def send_telegram_message(chat_id: str, text: str):
             })
             if resp.status_code != 200:
                 import logging
-                logging.error(f"Telegram API error: {resp.status_code} - {resp.text}")
+                logging.error(f"Telegram API error: {resp.status_code} - [token hidden]")
         except Exception as e:
             import logging
             logging.error(f"Telegram notification failed: {e}")
@@ -36,13 +39,17 @@ async def get_ip_location(ip: str) -> str:
         return "Локальная сеть"
         
     try:
+        # Validate IP before use to prevent SSRF
         addr = ipaddress.ip_address(ip)
         if addr.is_private or addr.is_loopback:
             return "Локальная сеть"
     except Exception:
-        pass
+        return "Локальная сеть"
     
-    url = f"http://ip-api.com/json/{ip}?fields=status,message,country,city"
+    # Use allowlist and strict URL building
+    domain = "ip-api.com"
+    url = f"http://{domain}/json/{ip}?fields=status,message,country,city"
+    
     async with httpx.AsyncClient(timeout=3) as client:
         try:
             resp = await client.get(url)
@@ -75,14 +82,53 @@ async def notify_security_event(chat_id: str, event: str, user_id: int, ip: str,
          
     await send_telegram_message(chat_id, message)
 
+def sanitize_meta(meta: dict) -> dict:
+    """Escapes strings and limits lengths in JSON metadata to prevent injection and OOM."""
+    sanitized = {}
+    if not meta:
+        return sanitized
+    for key, value in meta.items():
+        if isinstance(value, str):
+            sanitized[key] = html.escape(value)[:255]
+        elif isinstance(value, (int, float, bool)):
+            sanitized[key] = value
+    return sanitized
+
+def save_audit_log(user_id: int, event: str, meta: dict, ip: str):
+    """Background task to persist audit logs without blocking the main request."""
+    try:
+        with SessionLocal() as db:
+            db_audit = models.Audit(
+                user_id=user_id,
+                event=event,
+                meta=meta,
+                ip_address=ip
+            )
+            db.add(db_audit)
+            db.commit()
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to save audit log in background: {e}")
+
 def audit_event(db: Session, user_id: int, event: str, meta: dict = None, ip: str = None, background_tasks: BackgroundTasks = None):
-    """Records audit trail and triggers async Telegram alerts for the user."""
-    # Ensure user exists for notification
+    """Records audit trail and triggers async Telegram alerts. Uses background tasks if available."""
+    # Ensure user exists for notification (done synchronously to check if we should even notify)
     user = db.query(models.User).filter(models.User.id == user_id).first()
     
-    db_audit = models.Audit(user_id=user_id, event=event, meta=meta or {}, ip_address=ip)
-    db.add(db_audit)
-    db.commit()
+    sanitized = sanitize_meta(meta or {})
+    
+    if background_tasks:
+        background_tasks.add_task(save_audit_log, user_id, event, sanitized, ip)
+    else:
+        # Fallback for sync contexts (e.g. startup scripts or tests)
+        db_audit = models.Audit(
+            user_id=user_id, 
+            event=event, 
+            meta=sanitized, 
+            ip_address=ip
+        )
+        db.add(db_audit)
+        db.commit()
 
     # Trigger Telegram Alert for critical events if user has chat_id
     if user and user.telegram_chat_id and event in settings.CRITICAL_EVENTS and background_tasks:
@@ -106,18 +152,9 @@ def audit_event(db: Session, user_id: int, event: str, meta: dict = None, ip: st
 
 
 def validate_password_strength(password: str) -> bool:
-    """Hardened password policy: 14+ chars, upper, lower, digit, special symbol"""
-    if len(password) < 14:
-        return False
-    if not re.search(r'[A-Z]', password):
-        return False
-    if not re.search(r'[a-z]', password):
-        return False
-    if not re.search(r'\d', password):
-        return False
-    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
-        return False
-    return True
+    """Hardened password policy: 14+ chars, upper, lower, digit, special symbol, no common passwords."""
+    # Use the enhanced check from auth service if available
+    return auth.is_password_strong_enhanced(password)
 
 
 def get_user_by_login(db: Session, login: str):
@@ -131,7 +168,7 @@ def create_user(db: Session, user: schemas.UserCreate, background_tasks: Backgro
             detail="Password too weak. Minimum 14 characters, including uppercase, lowercase, digits, and special symbols."
         )
     salt = auth.generate_salt()
-    hashed_password = auth.get_password_hash(user.password)
+    hashed_password = auth.hash_password(user.password)
     db_user = models.User(
         login=user.login, 
         hashed_password=hashed_password, 
@@ -359,7 +396,7 @@ def get_passwords_by_folder(db: Session, folder_id: int, user_id: int, backgroun
     audit_event(db, user_id, "vault_read", meta={"folder_id": folder_id}, background_tasks=background_tasks)
     return db.query(models.Password).filter(
         models.Password.folder_id == folder_id,
-        models.Password.user_id == user_id
+        models.Password.user_id == user_id  # Strict user_id check (IDOR Protection)
     ).all()
 
 
