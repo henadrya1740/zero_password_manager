@@ -1,39 +1,53 @@
 name: Update Changelog
 
+# Runs on every push to main (not tags — releases handle their own changelog).
+# Generates an "Unreleased" section from commits since the last tag and
+# prepends it to CHANGELOG.md so the file is always up-to-date.
+
 on:
   push:
     branches:
       - main
     paths-ignore:
       - CHANGELOG.md
+      - pubspec.yaml
+      - '**.md'
+      - '.gitignore'
 
 permissions:
   contents: write
 
 jobs:
   changelog:
+    name: Regenerate CHANGELOG.md
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate changelog
-        uses: orhun/git-cliff-action@v2
-        with:
-          config: cliff.toml
-          args: -vv --latest --prepend CHANGELOG.md
-
-      - name: Commit changes
+      - name: Install git-cliff
         run: |
-          git config user.name "github-actions[bot]"
+          VERSION="2.4.0"
+          ARCHIVE="git-cliff-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          wget -q "https://github.com/orhun/git-cliff/releases/download/v${VERSION}/${ARCHIVE}"
+          tar -xzf "${ARCHIVE}"
+          sudo mv "git-cliff-${VERSION}/git-cliff" /usr/local/bin/git-cliff
+          git cliff --version
+
+      - name: Regenerate full CHANGELOG.md
+        run: |
+          # Generate the full changelog (all tags + unreleased commits)
+          git cliff --config cliff.toml --output CHANGELOG.md
+
+      - name: Commit updated changelog
+        run: |
+          git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git add CHANGELOG.md
-
+          # Exit 0 if nothing changed (no new commits to document)
           git commit -m "chore: update CHANGELOG.md [skip ci]" || exit 0
-
           git push

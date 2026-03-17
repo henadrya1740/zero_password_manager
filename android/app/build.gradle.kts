@@ -1,8 +1,20 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // Flutter Gradle plugin must come last
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// ── Keystore signing ──────────────────────────────────────────────────────────
+// Optional: place android/key.properties (gitignored) to enable release signing.
+// In CI, the file is written from GitHub Actions secrets (see .github/workflows/release-apk.yml).
+val keystorePropertiesFile = rootProject.file("key.properties")
+val useKeystore = keystorePropertiesFile.exists()
+val keystoreProperties = Properties().apply {
+    if (useKeystore) load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -29,15 +41,25 @@ android {
         // ── NDK / JNI ──────────────────────────────────────────────────────
         externalNativeBuild {
             cmake {
-                // Pass -DANDROID to the C++ compiler
                 cppFlags += "-std=c++17"
-                // Build for all common ABIs
                 abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86_64")
             }
         }
     }
 
-    // ── NDK build ──────────────────────────────────────────────────────────
+    // ── Signing configs ────────────────────────────────────────────────────────
+    signingConfigs {
+        if (useKeystore) {
+            create("release") {
+                storeFile     = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias      = keystoreProperties["keyAlias"] as String
+                keyPassword   = keystoreProperties["keyPassword"] as String
+            }
+        }
+    }
+
+    // ── NDK build ──────────────────────────────────────────────────────────────
     externalNativeBuild {
         cmake {
             path = file("CMakeLists.txt")
@@ -47,13 +69,17 @@ android {
 
     buildTypes {
         release {
-            // Minification — keep native method names so JNI lookup works
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig = signingConfigs.getByName("debug")
+            // Use release keystore when available, fall back to debug for local builds
+            signingConfig = if (useKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

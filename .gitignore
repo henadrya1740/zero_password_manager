@@ -48,6 +48,11 @@ app.*.map.json
 /android/captures/
 /android/.idea/
 /android/app/.cxx/
+# Keystore and signing credentials — NEVER commit these
+/android/key.properties
+/android/app/keystore.jks
+/android/app/*.jks
+/android/app/*.keystore
 
 # iOS/macOS
 **/ios/**/*.mode1v3
