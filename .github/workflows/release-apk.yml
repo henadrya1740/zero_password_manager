@@ -117,14 +117,46 @@ jobs:
         id: notes
         run: |
           TAG="${{ steps.ver.outputs.tag }}"
-          # Generate only the section for this tag, no global header
+          NAME="${{ steps.ver.outputs.name }}"
+
+          # ── Changelog section from git-cliff ──────────────────────────────
           git cliff \
             --config cliff.toml \
             --tag "${TAG}" \
             --latest \
             --strip header \
-            --output /tmp/release_notes.md
-          echo "--- Release notes ---"
+            --output /tmp/cliff_notes.md
+
+          # ── Build the full GitHub Release body ────────────────────────────
+          cat > /tmp/release_notes.md << MARKDOWN
+          ![Platform](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)
+          ![Version](https://img.shields.io/badge/version-${NAME}-5D52D2)
+          ![License](https://img.shields.io/badge/license-MIT-blue)
+
+          ## 🔐 Zero Password Manager ${TAG}
+
+          A zero-knowledge, end-to-end encrypted password manager.
+          Your master key never leaves your device — the server stores only encrypted blobs.
+
+          ---
+
+          ### 📲 Installation
+
+          1. Download **\`zero-password-manager-${TAG}.apk\`** below
+          2. On your Android device: **Settings → Security → Install unknown apps** → allow your browser/Files app
+          3. Open the downloaded APK and tap **Install**
+          4. Launch the app and connect to your self-hosted server
+
+          > **Minimum Android version:** 8.0 (API 26)
+
+          ---
+
+          MARKDOWN
+
+          # Append the git-cliff section (already has its own ### headings)
+          cat /tmp/cliff_notes.md >> /tmp/release_notes.md
+
+          echo "--- Release notes preview ---"
           cat /tmp/release_notes.md
 
       - name: Update CHANGELOG.md
@@ -143,13 +175,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          name: "Zero Password Manager ${{ steps.ver.outputs.tag }}"
+          name: "🔐 Zero Password Manager ${{ steps.ver.outputs.tag }}"
           draft: false
           prerelease: >-
             ${{ contains(steps.ver.outputs.tag, 'beta') ||
                 contains(steps.ver.outputs.tag, 'alpha') ||
                 contains(steps.ver.outputs.tag, 'rc') }}
           body_path: /tmp/release_notes.md
-          append_body: true
           files: |
             build/app/outputs/flutter-apk/zero-password-manager-${{ steps.ver.outputs.tag }}.apk
