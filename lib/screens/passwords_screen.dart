@@ -144,23 +144,30 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
     try {
       // Loads ONLY decrypted metadata — encrypted_payload stays encrypted
       final list = await VaultService().loadPasswordList();
+      // Local folder assignments override any server-side folder_id.
+      final folderMappings = await FolderService.getAllFolderMappings();
 
       setState(() {
-        passwords = list.map<Map<String, dynamic>>((item) => {
-          'id':               item['id'],
-          'title':            item['title']    ?? item['name'] ?? item['site_url'] ?? 'Безымянный',
-          'subtitle':         item['subtitle'] ?? item['site_login'] ?? 'Нет логина',
-          'site_url':         item['site_url']  ?? '',
-          // Keep encrypted payload for on-demand decryption in PasswordDetailScreen
-          'encrypted_payload':      item['encrypted_payload'],
-          'notes_encrypted':        item['notes_encrypted'],
-          'seed_phrase_encrypted':  item['seed_phrase_encrypted'],
-          'has_2fa':          item['has_2fa']          ?? false,
-          'has_seed_phrase':  item['has_seed_phrase']  ?? false,
-          'folder_id':        item['folder_id'],
-          'favicon_url':      item['favicon_url'],
-          'rotation_interval_days': item['rotation_interval_days'],
-          'last_rotated_at':  item['last_rotated_at'],
+        passwords = list.map<Map<String, dynamic>>((item) {
+          final id = item['id'] as int?;
+          final localFolderId = id != null ? folderMappings[id] : null;
+          return {
+            'id':               id,
+            'title':            item['title']    ?? item['name'] ?? item['site_url'] ?? 'Безымянный',
+            'subtitle':         item['subtitle'] ?? item['site_login'] ?? 'Нет логина',
+            'site_url':         item['site_url']  ?? '',
+            // Keep encrypted payload for on-demand decryption in PasswordDetailScreen
+            'encrypted_payload':      item['encrypted_payload'],
+            'notes_encrypted':        item['notes_encrypted'],
+            'seed_phrase_encrypted':  item['seed_phrase_encrypted'],
+            'has_2fa':          item['has_2fa']          ?? false,
+            'has_seed_phrase':  item['has_seed_phrase']  ?? false,
+            // Always use local assignment; fall back to server value if no local mapping.
+            'folder_id':        localFolderId ?? item['folder_id'],
+            'favicon_url':      item['favicon_url'],
+            'rotation_interval_days': item['rotation_interval_days'],
+            'last_rotated_at':  item['last_rotated_at'],
+          };
         }).toList();
         isLoading = false;
       });
@@ -1030,39 +1037,42 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
 
   Future<void> _applyFolderMove(
       Map<String, dynamic> item, int? folderId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('token') ?? '';
-    final id = item['id'];
-    try {
-      final response = await http.put(
-        Uri.parse('${AppConfig.baseUrl}/passwords/$id'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: json.encode({'folder_id': folderId}),
-      );
-      if (response.statusCode == 200 && mounted) {
-        await _loadAll();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.green,
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  folderId == null
-                      ? 'Удалено из папки'
-                      : 'Перемещено в папку',
-                  style: const TextStyle(color: Colors.white),
-                ),
-              ],
-            ),
+    final id = item['id'] as int?;
+    if (id == null) return;
+
+    // Purely local — no server call.
+    await FolderService.setFolderForPassword(id, folderId);
+
+    if (!mounted) return;
+
+    // Update in-memory list immediately.
+    setState(() {
+      passwords = passwords.map((p) {
+        if (p['id'] == id) return {...p, 'folder_id': folderId};
+        return p;
+      }).toList();
+    });
+
+    // Reload folder counts in the bottom nav bar.
+    await _loadFolders();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.green,
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                folderId == null ? 'Удалено из папки' : 'Перемещено в папку',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ],
           ),
-        );
-      }
-    } catch (_) {}
+        ),
+      );
+    }
   }
 
   Future<void> _showFolderDialog({Map<String, dynamic>? existing}) async {
