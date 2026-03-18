@@ -186,19 +186,40 @@ class VaultService {
   /// Fetches all passwords and decrypts ONLY metadata (name, login, site_url).
   /// The `encrypted_payload` field is preserved as-is for on-demand decryption.
   /// No plaintext password is ever held in the returned list.
+  ///
+  /// On success the raw server response is persisted in the local Hive cache so
+  /// the vault remains readable when the server is unreachable or the token has
+  /// just expired (e.g. after CSV import and app restart).
   Future<List<Map<String, dynamic>>> loadPasswordList() async {
     if (_masterKey == null) throw Exception('Vault is locked');
 
-    final response = await ApiService.get(AppConfig.passwordsUrl);
-    if (response.statusCode != 200) throw Exception('Failed to fetch passwords');
+    List<dynamic>? rawList;
 
-    final rawList = json.decode(response.body) as List<dynamic>;
-    final result  = <Map<String, dynamic>>[];
+    try {
+      final response = await ApiService.get(AppConfig.passwordsUrl);
+      if (response.statusCode == 200) {
+        rawList = json.decode(response.body) as List<dynamic>;
+        // Persist encrypted server response for offline access
+        await _cache.cachePasswordList(rawList.cast<Map<String, dynamic>>());
+      }
+    } catch (_) {
+      // Network error — fall through to cache below
+    }
 
+    // Fall back to local cache when server is unavailable
+    if (rawList == null) {
+      final cached = _cache.getCachedPasswordList();
+      if (cached != null) {
+        rawList = cached;
+      } else {
+        throw Exception('Failed to fetch passwords and no local cache available');
+      }
+    }
+
+    final result = <Map<String, dynamic>>[];
     for (final item in rawList) {
       result.add(await _decryptMetadataOnly(item as Map<String, dynamic>));
     }
-
     return result;
   }
 

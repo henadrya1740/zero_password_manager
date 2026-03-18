@@ -275,6 +275,24 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
       final token = prefs.getString('token');
 
       final passwordId = widget.password['id'];
+
+      // Log history BEFORE deleting — once the password is deleted the server
+      // cannot satisfy the FK constraint if we send the old password_id.
+      // Sending passwordId: null keeps the history record valid regardless.
+      await PasswordHistoryService.addPasswordHistory(
+        passwordId: null,
+        actionType: 'DELETE',
+        actionDetails: {
+          'deleted_password': {
+            'site_url': widget.password['title'] ?? '',
+            'site_login': widget.password['subtitle'] ?? '',
+            'has_2fa': widget.password['has_2fa'] ?? false,
+            'has_seed_phrase': widget.password['has_seed_phrase'] ?? false,
+          },
+        },
+        siteUrl: widget.password['title'] ?? '',
+      );
+
       http.Response response;
 
       if (passwordId != null) {
@@ -290,20 +308,6 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
       }
 
       if (response.statusCode == 204 || response.statusCode == 200) {
-        await PasswordHistoryService.addPasswordHistory(
-          passwordId: passwordId ?? widget.password['id'],
-          actionType: 'DELETE',
-          actionDetails: {
-            'deleted_password': {
-              'site_url': widget.password['title'] ?? '',
-              'site_login': widget.password['subtitle'] ?? '',
-              'has_2fa': widget.password['has_2fa'] ?? false,
-              'has_seed_phrase': widget.password['has_seed_phrase'] ?? false,
-            },
-          },
-          siteUrl: widget.password['title'] ?? '',
-        );
-
         if (mounted) Navigator.pop(context, true);
       } else {
         final data = jsonDecode(response.body);

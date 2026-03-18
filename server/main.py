@@ -536,10 +536,12 @@ def log_password_history(request: Request,
                         background_tasks: BackgroundTasks,
                         current_user: models.User = Depends(auth_deps.get_current_user),
                         db: Session = Depends(get_db)):
-    # OTP-Gated if configured
-    if "vault_write" in settings.PERMISSIONS_OTP_LIST:
+    # History logging is always allowed — the vault_write OTP gate protects the
+    # actual password operation; adding a separate OTP for logging would force
+    # the user to enter their TOTP twice per delete/update, which is wrong.
+    if "history_write" in settings.PERMISSIONS_OTP_LIST:
         verify_hardened_otp(db, current_user, request.headers.get("X-OTP"), background_tasks=background_tasks)
-        
+
     return crud.create_history(db, history, user_id=current_user.id)
 
 

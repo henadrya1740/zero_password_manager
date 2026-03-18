@@ -56,6 +56,26 @@ class CacheService {
     return box.keys.cast<String>().toList();
   }
 
+  /// Persists the full raw password list (server response, still server-encrypted)
+  /// so the vault can be displayed offline or when the token has expired.
+  Future<void> cachePasswordList(List<Map<String, dynamic>> rawList) async {
+    final box = Hive.box(_vaultBoxName);
+    await box.put('__list__', json.encode(rawList));
+  }
+
+  /// Returns the previously cached raw password list, or null if not available.
+  List<Map<String, dynamic>>? getCachedPasswordList() {
+    final box = Hive.box(_vaultBoxName);
+    final data = box.get('__list__');
+    if (data == null) return null;
+    try {
+      final list = json.decode(data as String) as List<dynamic>;
+      return list.cast<Map<String, dynamic>>();
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Clears the entire local cache (e.g., on logout or security reset).
   Future<void> clearCache() async {
     final box = Hive.box(_vaultBoxName);
