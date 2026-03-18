@@ -16,6 +16,7 @@ from .models import User, IPBlock, FailedAttempt, SecurityEvent
 import re
 import logging
 import json
+import ipaddress
 from fastapi import Request
 from user_agents import parse
 
@@ -50,10 +51,7 @@ SECURITY_PARAMS = {
         "sqlmap": [r"sqlmap", r"UNION\s+SELECT", r"'\s+OR\s+1=1"],
         "dirbuster": [r"DirBuster", r"DirectoryScanner"]
     },
-    "WHITELIST_IPS": [
-        "127.0.0.1",
-        "::1"
-    ]
+    "WHITELIST_IPS": [] # Deprecated, use settings.WHITELIST_IPS
 }
 
 BRUTE_FORCE_PROTECTION = {
@@ -330,7 +328,15 @@ class SecurityManager:
 
     @staticmethod
     def is_ip_whitelisted(ip: str) -> bool:
-        return ip in SECURITY_PARAMS["WHITELIST_IPS"]
+        if ip in settings.WHITELIST_IPS:
+            return True
+            
+        try:
+            addr = ipaddress.ip_address(ip)
+            # Allow private network (192.168.x.x, 10.x.x.x, etc), loopback, and link-local
+            return addr.is_private or addr.is_loopback or addr.is_link_local
+        except ValueError:
+            return False
 
     @staticmethod
     def is_ip_blocked(db: Session, ip: str) -> bool:

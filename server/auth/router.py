@@ -13,7 +13,7 @@ _log = logging.getLogger(__name__)
 
 from ..audit.service import record as audit
 from ..database import get_db
-from ..models import FailedAttempt, User
+from ..models import FailedAttempt, RefreshToken, User
 from ..utils import get_client_ip
 from .dependencies import get_current_user, get_current_user_optional
 from .exceptions import (
@@ -57,6 +57,7 @@ from .service import (
     get_device_id_from_request,
     log_security_event,
     notify_user_of_suspicious_activity,
+    verify_refresh_token,
 )
 from ..config import settings
 from ..security import SecurityManager, SECURITY_PARAMS
