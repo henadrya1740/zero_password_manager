@@ -590,6 +590,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                   ? const Center(child: CircularProgressIndicator())
                   : _buildBody(),
         ),
+        bottomNavigationBar: folders.isEmpty ? null : _buildFolderNavBar(),
       ),
     );
   }
@@ -717,7 +718,6 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
   }
 
   Widget _buildNormalBody() {
-    // Filter passwords by selected folder
     final List<Map<String, dynamic>> filtered =
         _selectedFolderId == null
             ? passwords
@@ -725,236 +725,325 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                 .where((p) => p['folder_id'] == _selectedFolderId)
                 .toList();
 
-    return CustomScrollView(
-      slivers: [
-        // Folder bar (only when viewing all)
-        if (_selectedFolderId == null && folders.isNotEmpty)
-          SliverToBoxAdapter(child: _buildFolderBar()),
+    return _buildPasswordsSection(filtered);
+  }
 
-        // Password list
-        SliverToBoxAdapter(child: _buildPasswordsSection(filtered)),
-      ],
+  // ── Bottom folder nav bar ─────────────────────────────────────────────────
+
+  Widget _buildFolderNavBar() {
+    // "All" + actual folders + "+" button
+    final items = <Map<String, dynamic>>[
+      {'id': null, 'name': 'Все', 'icon': 'apps', 'color': '#5D52D2', '_count': passwords.length},
+      ...folders,
+    ];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border(
+          top: BorderSide(color: AppColors.text.withOpacity(0.08), width: 1),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              height: 64,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      itemCount: items.length,
+                      itemBuilder: (ctx, i) {
+                        final item = items[i];
+                        final folderId = item['id'] as int?;
+                        final isSelected = _selectedFolderId == folderId;
+                        final color = _colorFromHex(item['color'] as String? ?? '#5D52D2');
+                        final icon = _iconFromName(item['icon'] as String? ?? 'folder');
+                        final count = (item['_count'] ?? item['password_count'] ?? 0) as int;
+
+                        return GestureDetector(
+                          onTap: () => setState(() => _selectedFolderId = folderId),
+                          onLongPress: folderId != null
+                              ? () => _showFolderActions(item)
+                              : null,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            curve: Curves.easeInOut,
+                            margin: const EdgeInsets.only(right: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? color.withOpacity(0.15)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(20),
+                              border: isSelected
+                                  ? Border.all(color: color.withOpacity(0.5), width: 1.5)
+                                  : null,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  icon,
+                                  size: 16,
+                                  color: isSelected
+                                      ? color
+                                      : AppColors.text.withOpacity(0.5),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  item['name'] as String? ?? '',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: isSelected
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
+                                    color: isSelected
+                                        ? color
+                                        : AppColors.text.withOpacity(0.65),
+                                  ),
+                                ),
+                                const SizedBox(width: 5),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 5, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? color.withOpacity(0.25)
+                                        : AppColors.text.withOpacity(0.07),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '$count',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: isSelected
+                                          ? color
+                                          : AppColors.text.withOpacity(0.4),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  // New folder / manage button
+                  GestureDetector(
+                    onTap: () => _showFolderDialog(),
+                    onLongPress: _openFoldersScreen,
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      margin: const EdgeInsets.only(right: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.button.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: AppColors.button.withOpacity(0.25),
+                          width: 1,
+                        ),
+                      ),
+                      child: Icon(Icons.create_new_folder_outlined,
+                          size: 20, color: AppColors.button),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildFolderBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  // ── Move-to-folder ────────────────────────────────────────────────────────
+
+  Future<void> _moveToFolder(Map<String, dynamic> item) async {
+    if (folders.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.input,
+          content: Text(
+            'Создайте папку сначала',
+            style: TextStyle(color: AppColors.text),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final int? currentFolderId = item['folder_id'] as int?;
+    int? chosen = currentFolderId;
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => DraggableScrollableSheet(
+          initialChildSize: 0.55,
+          minChildSize: 0.3,
+          maxChildSize: 0.85,
+          expand: false,
+          builder: (_, ctrl) => Column(
             children: [
-              NeonText(
-                text: 'Папки',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.text.withOpacity(0.7),
+              const SizedBox(height: 12),
+              Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.text.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              GestureDetector(
-                onTap: _openFoldersScreen,
-                child: Text(
-                  'Управление',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: AppColors.button,
-                    fontWeight: FontWeight.w500,
-                  ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Icon(Icons.drive_file_move_outline,
+                        color: AppColors.button, size: 22),
+                    const SizedBox(width: 10),
+                    NeonText(
+                      text: 'Переместить в папку',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.text,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: ListView(
+                  controller: ctrl,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 8),
+                  children: [
+                    // "No folder" option
+                    _FolderMoveItem(
+                      icon: Icons.folder_off_outlined,
+                      iconColor: AppColors.text.withOpacity(0.4),
+                      bgColor: AppColors.input,
+                      label: 'Без папки',
+                      isSelected: chosen == null,
+                      onTap: () async {
+                        setSheet(() => chosen = null);
+                        Navigator.pop(ctx);
+                        await _applyFolderMove(item, null);
+                      },
+                    ),
+                    const SizedBox(height: 4),
+                    ...folders.map((folder) {
+                      final color = _colorFromHex(
+                          folder['color'] as String? ?? '#5D52D2');
+                      final icon = _iconFromName(
+                          folder['icon'] as String? ?? 'folder');
+                      final isHidden =
+                          folder['is_hidden'] as bool? ?? false;
+                      final isSel = chosen == folder['id'];
+                      return _FolderMoveItem(
+                        icon: icon,
+                        iconColor: color,
+                        bgColor: color.withOpacity(0.12),
+                        label: folder['name'] as String? ?? '',
+                        sublabel: isHidden ? '🔒 Скрытая' : null,
+                        isSelected: isSel,
+                        onTap: () async {
+                          setSheet(() => chosen = folder['id'] as int?);
+                          Navigator.pop(ctx);
+                          await _applyFolderMove(item, folder['id'] as int?);
+                        },
+                      );
+                    }),
+                    const SizedBox(height: 24),
+                    // Create new folder shortcut
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _showFolderDialog();
+                        },
+                        icon: Icon(Icons.add, color: AppColors.button),
+                        label: Text(
+                          'Создать новую папку',
+                          style: TextStyle(color: AppColors.button),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(
+                              color: AppColors.button.withOpacity(0.4)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 96,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: folders.length + 2, // +1 for "All" chip, +1 for "Add" chip
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (context, index) {
-                if (index == folders.length + 1) {
-                  return _buildAddFolderChip();
-                }
-                if (index == 0) {
-                  return _buildFolderChip(
-                    label: 'Все',
-                    icon: Icons.apps,
-                    color: AppColors.button,
-                    count: passwords.length,
-                    isSelected: _selectedFolderId == null,
-                    onTap: () => setState(() => _selectedFolderId = null),
-                    onLongPress: () {}, // No actions for "All" chip
-                  );
-                }
-                final folder = folders[index - 1];
-                final color = _colorFromHex(
-                  folder['color'] as String? ?? '#5D52D2',
-                );
-                final iconData = _iconFromName(
-                  folder['icon'] as String? ?? 'folder',
-                );
-                final isSelected = _selectedFolderId == folder['id'];
-                final count = folder['password_count'] ?? 0;
-
-                return _buildFolderChip(
-                  label: folder['name'] as String? ?? '',
-                  icon: iconData,
-                  color: color,
-                  count: count,
-                  isSelected: isSelected,
-                  onTap: () => setState(() => _selectedFolderId = folder['id'] as int),
-                  onLongPress: () => _showFolderActions(folder),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 8),
-          Divider(color: AppColors.text.withOpacity(0.08), height: 1),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFolderChip({
-    required String label,
-    required IconData icon,
-    required Color color,
-    required int count,
-    required bool isSelected,
-    required VoidCallback onTap,
-    required VoidCallback onLongPress,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-        width: 76,
-        decoration: BoxDecoration(
-          color: isSelected ? color.withOpacity(0.15) : AppColors.input,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isSelected ? color : AppColors.text.withOpacity(0.06),
-            width: isSelected ? 1.5 : 1,
-          ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: color.withOpacity(
-                      ThemeManager.colors.hasNeonGlow ? 0.35 : 0.15,
-                    ),
-                    blurRadius: ThemeManager.colors.hasNeonGlow ? 12 : 6,
-                    spreadRadius: 0,
-                  ),
-                ]
-              : null,
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? color.withOpacity(0.25)
-                    : AppColors.text.withOpacity(0.07),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                icon,
-                color: isSelected ? color : AppColors.text.withOpacity(0.45),
-                size: 20,
-              ),
-            ),
-            const SizedBox(height: 5),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: isSelected ? color : AppColors.text.withOpacity(0.75),
-                  fontWeight:
-                      isSelected ? FontWeight.w700 : FontWeight.w500,
-                  letterSpacing: -0.2,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: 2),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? color.withOpacity(0.2)
-                    : AppColors.text.withOpacity(0.06),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                '$count',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: isSelected
-                      ? color
-                      : AppColors.text.withOpacity(0.4),
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );
   }
 
-  Widget _buildAddFolderChip() {
-    return GestureDetector(
-      onTap: () => _showFolderDialog(),
-      child: Container(
-        width: 76,
-        decoration: BoxDecoration(
-          color: AppColors.input,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: AppColors.button.withOpacity(0.25),
-            width: 1,
-            style: BorderStyle.solid,
+  Future<void> _applyFolderMove(
+      Map<String, dynamic> item, int? folderId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token') ?? '';
+    final id = item['id'];
+    try {
+      final response = await http.put(
+        Uri.parse('${AppConfig.baseUrl}/passwords/$id'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({'folder_id': folderId}),
+      );
+      if (response.statusCode == 200 && mounted) {
+        await _loadAll();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.green,
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  folderId == null
+                      ? 'Удалено из папки'
+                      : 'Перемещено в папку',
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ],
+            ),
           ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: AppColors.button.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(Icons.add, color: AppColors.button, size: 20),
-            ),
-            const SizedBox(height: 5),
-            Text(
-              'Новая',
-              style: TextStyle(
-                fontSize: 10.5,
-                color: AppColors.button.withOpacity(0.85),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+        );
+      }
+    } catch (_) {}
   }
 
   Future<void> _showFolderDialog({Map<String, dynamic>? existing}) async {
@@ -1278,6 +1367,147 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
     return _buildPasswordsList(filtered);
   }
 
+  void _showPasswordContextMenu(Map<String, dynamic> item) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 36, height: 4,
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: AppColors.text.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+              child: Row(
+                children: [
+                  Container(
+                    width: 38, height: 38,
+                    decoration: BoxDecoration(
+                      color: AppColors.button.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.web, color: AppColors.button, size: 18),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item['title'] ?? '',
+                          style: TextStyle(
+                            color: AppColors.text,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          item['subtitle'] ?? '',
+                          style: TextStyle(
+                            color: AppColors.text.withOpacity(0.6),
+                            fontSize: 13,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Divider(color: AppColors.text.withOpacity(0.08), height: 16),
+            ListTile(
+              leading: Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.button.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.drive_file_move_outline,
+                    color: AppColors.button, size: 18),
+              ),
+              title: Text('Переместить в папку',
+                  style: TextStyle(color: AppColors.text, fontSize: 15)),
+              subtitle: Text(
+                item['folder_id'] != null ? 'Изменить папку' : 'Добавить в папку',
+                style: TextStyle(color: AppColors.text.withOpacity(0.5), fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _moveToFolder(item);
+              },
+            ),
+            ListTile(
+              leading: Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.share, color: Colors.blue, size: 18),
+              ),
+              title: Text('Поделиться паролем',
+                  style: TextStyle(color: AppColors.text, fontSize: 15)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _sharePassword(item);
+              },
+            ),
+            ListTile(
+              leading: Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.edit_outlined,
+                    color: Colors.orange, size: 18),
+              ),
+              title: Text('Редактировать',
+                  style: TextStyle(color: AppColors.text, fontSize: 15)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _navigateToEditPassword(item);
+              },
+            ),
+            ListTile(
+              leading: Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.copy_outlined,
+                    color: Colors.green, size: 18),
+              ),
+              title: Text('Скопировать пароль',
+                  style: TextStyle(color: AppColors.text, fontSize: 15)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _copyPassword(item['encrypted_payload'] ?? '');
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildPasswordsList(List<Map<String, dynamic>> passwordsToShow) {
     final visiblePasswords =
         passwordsToShow
@@ -1341,6 +1571,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
           margin: const EdgeInsets.only(bottom: 16),
           child: InkWell(
             onTap: () => _navigateToDetail(item),
+            onLongPress: () => _showPasswordContextMenu(item),
             borderRadius: BorderRadius.circular(12),
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -1517,7 +1748,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                       ),
                       IconButton(
                         icon: Icon(Icons.copy, color: AppColors.button),
-                        onPressed: () => _copyPassword(item['password'] ?? ''),
+                        onPressed: () => _copyPassword(item['encrypted_payload'] ?? ''),
                         tooltip: 'Копировать пароль',
                       ),
                     ],
@@ -1528,6 +1759,89 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
           ),
         );
       },
+    );
+  }
+}
+
+// ── Folder move item ──────────────────────────────────────────────────────────
+
+class _FolderMoveItem extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final Color bgColor;
+  final String label;
+  final String? sublabel;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _FolderMoveItem({
+    required this.icon,
+    required this.iconColor,
+    required this.bgColor,
+    required this.label,
+    this.sublabel,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? iconColor.withOpacity(0.12)
+              : AppColors.input,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isSelected ? iconColor.withOpacity(0.5) : Colors.transparent,
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: iconColor, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 15,
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                  if (sublabel != null)
+                    Text(
+                      sublabel!,
+                      style: TextStyle(
+                        color: AppColors.text.withOpacity(0.5),
+                        fontSize: 12,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              Icon(Icons.check_circle, color: iconColor, size: 20),
+          ],
+        ),
+      ),
     );
   }
 }

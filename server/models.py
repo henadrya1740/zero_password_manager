@@ -215,6 +215,8 @@ class SecurityEvent(Base):
     ip = Column(String)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+    user = relationship("User")
+
 
 class PasswordShare(Base):
     """Zero-knowledge password share.
@@ -241,5 +243,3 @@ class PasswordShare(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     owner = relationship("User", foreign_keys=[owner_id])
-
-    user = relationship("User")
