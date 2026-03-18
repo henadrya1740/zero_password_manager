@@ -165,6 +165,36 @@ class VaultService {
     }
   }
 
+  // ── No-PIN master key storage (device-keystore backed, no user secret) ───────
+  // Used when the user opts out of PIN — the master key is still protected by
+  // the Android Keystore / iOS Secure Enclave at the OS level.
+  static const _noPinStorageKey = 'master_key_no_pin';
+
+  /// Persist master key without a user PIN. Only call when the vault is unlocked.
+  Future<void> storeNoPinMasterKey() async {
+    if (_masterKey == null) return;
+    final keyBytes = Uint8List.fromList(await _masterKey!.extractBytes());
+    await _storage.write(key: _noPinStorageKey, value: base64.encode(keyBytes));
+    keyBytes.fillRange(0, keyBytes.length, 0);
+  }
+
+  /// Restore master key from no-PIN storage. Returns true on success.
+  Future<bool> loadNoPinMasterKey() async {
+    final stored = await _storage.read(key: _noPinStorageKey);
+    if (stored == null) return false;
+    try {
+      _masterKey = SecretKey(base64.decode(stored));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Erase no-PIN master key (call after user sets up PIN or logs out).
+  Future<void> clearNoPinMasterKey() async {
+    await _storage.delete(key: _noPinStorageKey);
+  }
+
   Future<void> clearAllData() async {
     lock();
 
