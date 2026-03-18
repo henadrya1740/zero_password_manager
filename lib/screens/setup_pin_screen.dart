@@ -145,6 +145,9 @@ class _SetupPinScreenState extends State<SetupPinScreen>
       // 2. Encrypt master key with PIN bytes — no String creation (CWE-256)
       await VaultService().storeMasterKeyWithPinBytes(_pinBytes);
 
+      // 3. Remove no-PIN key if it existed (user now has a PIN).
+      await VaultService().clearNoPinMasterKey();
+
       // 3. Zero PIN bytes after all operations
       _pinBytes.fillRange(0, _pinBytes.length, 0);
       _pinBytes = Uint8List(0);
@@ -341,12 +344,17 @@ class _SetupPinScreenState extends State<SetupPinScreen>
 
                   if (!_isConfirming)
                     TextButton(
-                      onPressed: () {
-                        Navigator.pushNamedAndRemoveUntil(
-                          context,
-                          '/passwords',
-                          (route) => false,
-                        );
+                      onPressed: () async {
+                        // Persist master key using device keystore so user can
+                        // re-enter the app without PIN on cold restart.
+                        await VaultService().storeNoPinMasterKey();
+                        if (mounted) {
+                          Navigator.pushNamedAndRemoveUntil(
+                            context,
+                            '/passwords',
+                            (route) => false,
+                          );
+                        }
                       },
                       child: const Text(
                         'Пропустить',

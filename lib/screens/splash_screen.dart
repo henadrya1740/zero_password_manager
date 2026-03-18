@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:safe_device/safe_device.dart';
 import 'package:nk3_zero/screens/login_screen.dart';
+import 'package:nk3_zero/screens/passwords_screen.dart';
 import 'package:nk3_zero/screens/pin_screen.dart';
 import 'package:nk3_zero/screens/setup_pin_screen.dart';
 import '../config/app_config.dart';
 import '../utils/pin_security.dart';
+import '../services/vault_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -63,23 +65,29 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
+    Widget destination;
+    if (token != null) {
+      if (hasPinHash) {
+        // User has a PIN → go to PIN screen to unlock vault.
+        destination = const PinScreen();
+      } else {
+        // No PIN set — try to restore master key from device keystore
+        // (stored when user pressed "Skip" on SetupPinScreen).
+        final restored = await VaultService().loadNoPinMasterKey();
+        if (restored) {
+          destination = const PasswordsScreen();
+        } else {
+          // Key not persisted (e.g. fresh install after logout) — need login.
+          destination = const LoginScreen();
+        }
+      }
+    } else {
+      destination = const LoginScreen();
+    }
+
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (context) {
-          if (token != null) {
-            if (hasPinHash) {
-              return const PinScreen();
-            } else {
-              // No PIN stored → vault cannot be unlocked from local storage.
-              // Send user to login so they re-derive the master key from their
-              // password. SetupPinScreen will be offered after a successful login.
-              return const LoginScreen();
-            }
-          } else {
-            return const LoginScreen();
-          }
-        },
-      ),
+      MaterialPageRoute(builder: (_) => destination),
     );
   }
 

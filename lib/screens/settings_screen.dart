@@ -499,7 +499,102 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _toggleBiometric(bool value) async {
     if (value) {
-      // Включаем биометрическую аутентификацию — сохраняем мастер-ключ в биометрическое хранилище
+      // ── Step 1: Verify TOTP before storing the master key biometrically ───────
+      final totpController = TextEditingController();
+      final String? otp = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.input,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(
+            'Подтверждение TOTP',
+            style: TextStyle(color: AppColors.text, fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.fingerprint, size: 48, color: AppColors.button),
+              const SizedBox(height: 12),
+              Text(
+                'Для включения биометрической аутентификации введите TOTP-код из приложения-аутентификатора.',
+                style: TextStyle(color: AppColors.text.withOpacity(0.75), fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: totpController,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                style: TextStyle(color: AppColors.text, fontSize: 20, letterSpacing: 4),
+                textAlign: TextAlign.center,
+                decoration: InputDecoration(
+                  hintText: '000000',
+                  hintStyle: TextStyle(color: AppColors.text.withOpacity(0.3)),
+                  counterText: '',
+                  filled: true,
+                  fillColor: AppColors.background,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: AppColors.button.withOpacity(0.4)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: AppColors.button, width: 2),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Отмена', style: TextStyle(color: AppColors.text.withOpacity(0.6))),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.button),
+              onPressed: () => Navigator.pop(ctx, totpController.text.trim()),
+              child: const Text('Подтвердить', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+
+      if (otp == null || otp.isEmpty) return;
+
+      // ── Step 2: Verify OTP server-side ────────────────────────────────────────
+      try {
+        final verifyResp = await http.post(
+          Uri.parse(AppConfig.verifyTotpUrl),
+          headers: {
+            'X-OTP': otp,
+            'Authorization': 'Bearer ${(await SharedPreferences.getInstance()).getString('token') ?? ''}',
+          },
+        );
+        if (verifyResp.statusCode != 200) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                backgroundColor: Colors.red,
+                content: Text('Неверный TOTP-код. Биометрия не включена.'),
+              ),
+            );
+          }
+          return;
+        }
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.red,
+              content: Text('Ошибка проверки TOTP. Проверьте соединение.'),
+            ),
+          );
+        }
+        return;
+      }
+
+      // ── Step 3: Store master key in biometric keystore ────────────────────────
       try {
         final vault = VaultService();
         if (vault.isLocked) {
@@ -516,22 +611,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
         final keyBytes = await vault.masterKey!.extractBytes();
         final keyB64 = base64.encode(keyBytes);
-        // Zero raw bytes immediately after encoding
         (keyBytes as Uint8List).fillRange(0, keyBytes.length, 0);
 
         final stored = await BiometricService.storeBiometricSecret(keyB64);
 
         if (stored) {
           await BiometricService.setBiometricEnabled(true);
-          setState(() {
-            _biometricEnabled = true;
-          });
+          setState(() => _biometricEnabled = true);
 
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 backgroundColor: Colors.green,
-                content: Text('$_biometricType включен'),
+                content: Text('$_biometricType включён'),
               ),
             );
           }
@@ -540,7 +632,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 backgroundColor: Colors.red,
-                content: Text('Аутентификация не пройдена'),
+                content: Text('Биометрическая аутентификация не пройдена'),
               ),
             );
           }
@@ -550,9 +642,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: Colors.red,
-              content: Text(
-                'Ошибка при включении биометрической аутентификации',
-              ),
+              content: Text('Ошибка при включении биометрической аутентификации'),
             ),
           );
         }
