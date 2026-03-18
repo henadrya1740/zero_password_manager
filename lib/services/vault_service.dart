@@ -326,7 +326,6 @@ class VaultService {
     required String password,
     String? notes,
     String? seedPhrase,
-    int? folderId,
   }) async {
     if (_masterKey == null) throw Exception('Vault is locked');
 
@@ -342,7 +341,6 @@ class VaultService {
       'encrypted_payload':      encPayload,
       'notes_encrypted':        encNotes,
       'seed_phrase_encrypted':  encSeed,
-      'folder_id':              folderId,
     });
 
     // Wipe transient plaintext strings

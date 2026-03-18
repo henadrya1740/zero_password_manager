@@ -192,8 +192,11 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
             hasSeedPhrase && seedPhraseController.text.trim().isNotEmpty
                 ? seedPhraseController.text.trim()
                 : null,
-        folderId: _selectedFolderId,
       );
+      // Folder assignment is local-only — save after successful server update.
+      if (siteId is int) {
+        await FolderService.setFolderForPassword(siteId, _selectedFolderId);
+      }
 
       await PasswordHistoryService.addPasswordHistory(
         passwordId: siteId,

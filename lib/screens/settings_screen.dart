@@ -478,6 +478,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  void _showBiometricSuccessAnimation() {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (ctx, anim1, anim2) => const _BiometricSuccessDialog(),
+      transitionBuilder: (ctx, anim1, anim2, child) {
+        return ScaleTransition(
+          scale: CurvedAnimation(parent: anim1, curve: Curves.elasticOut),
+          child: FadeTransition(opacity: anim1, child: child),
+        );
+      },
+    );
+  }
+
   Future<void> _loadBiometricSettings() async {
     try {
       final biometricAvailable = await BiometricService.isAvailable();
@@ -499,133 +516,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _toggleBiometric(bool value) async {
     if (value) {
-      // ── Step 1: Verify TOTP before storing the master key biometrically ───────
-      final totpController = TextEditingController();
-      final String? otp = await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.input,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(
-            'Подтверждение TOTP',
-            style: TextStyle(color: AppColors.text, fontWeight: FontWeight.bold),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.fingerprint, size: 48, color: AppColors.button),
-              const SizedBox(height: 12),
-              Text(
-                'Для включения биометрической аутентификации введите TOTP-код из приложения-аутентификатора.',
-                style: TextStyle(color: AppColors.text.withOpacity(0.75), fontSize: 13),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: totpController,
-                autofocus: true,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
-                style: TextStyle(color: AppColors.text, fontSize: 20, letterSpacing: 4),
-                textAlign: TextAlign.center,
-                decoration: InputDecoration(
-                  hintText: '000000',
-                  hintStyle: TextStyle(color: AppColors.text.withOpacity(0.3)),
-                  counterText: '',
-                  filled: true,
-                  fillColor: AppColors.background,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: AppColors.button.withOpacity(0.4)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: AppColors.button, width: 2),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('Отмена', style: TextStyle(color: AppColors.text.withOpacity(0.6))),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.button),
-              onPressed: () => Navigator.pop(ctx, totpController.text.trim()),
-              child: const Text('Подтвердить', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
-      );
-
-      if (otp == null || otp.isEmpty) return;
-
-      // ── Step 2: Verify OTP server-side ────────────────────────────────────────
-      try {
-        final verifyResp = await http.post(
-          Uri.parse(AppConfig.verifyTotpUrl),
-          headers: {
-            'X-OTP': otp,
-            'Authorization': 'Bearer ${(await SharedPreferences.getInstance()).getString('token') ?? ''}',
-          },
-        );
-        if (verifyResp.statusCode != 200) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                backgroundColor: Colors.red,
-                content: Text('Неверный TOTP-код. Биометрия не включена.'),
-              ),
-            );
-          }
-          return;
-        }
-      } catch (_) {
+      // ── Step 1: Guard — vault must be unlocked ─────────────────────────────
+      final vault = VaultService();
+      if (vault.isLocked) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              backgroundColor: Colors.red,
-              content: Text('Ошибка проверки TOTP. Проверьте соединение.'),
+              backgroundColor: Colors.orange,
+              content: Text('Хранилище заблокировано. Войдите через PIN для включения биометрии.'),
             ),
           );
         }
         return;
       }
 
-      // ── Step 3: Store master key in biometric keystore ────────────────────────
+      // ── Step 2: Check biometric hardware availability ─────────────────────
+      final available = await BiometricService.isAvailable();
+      if (!available) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.orange,
+              content: Text(
+                'Отпечатки пальцев не настроены. Добавьте отпечаток в Настройках телефона → Безопасность.',
+              ),
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
+        return;
+      }
+
+      // ── Step 3: Store master key in secure storage (local only, no server) ─
       try {
-        // Double-check biometric availability before attempting store
-        final stillAvailable = await BiometricService.isAvailable();
-        if (!stillAvailable) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                backgroundColor: Colors.orange,
-                content: Text(
-                  'Отпечатки пальцев не настроены. Перейдите в Настройки → Безопасность → Отпечаток пальца и добавьте отпечаток.',
-                ),
-                duration: Duration(seconds: 5),
-              ),
-            );
-          }
-          return;
-        }
-
-        final vault = VaultService();
-        if (vault.isLocked) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                backgroundColor: Colors.orange,
-                content: Text('Хранилище заблокировано. Войдите через PIN для включения биометрии.'),
-              ),
-            );
-          }
-          return;
-        }
-
         final keyBytes = await vault.masterKey!.extractBytes();
         final keyB64 = base64.encode(keyBytes);
         (keyBytes as Uint8List).fillRange(0, keyBytes.length, 0);
@@ -635,21 +558,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (stored) {
           await BiometricService.setBiometricEnabled(true);
           setState(() => _biometricEnabled = true);
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                backgroundColor: Colors.green,
-                content: Text('$_biometricType включён'),
-              ),
-            );
-          }
+          if (mounted) _showBiometricSuccessAnimation();
         } else {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 backgroundColor: Colors.red,
-                content: Text('Биометрическая аутентификация не пройдена'),
+                content: Text('Не удалось сохранить ключ. Попробуйте снова.'),
               ),
             );
           }
@@ -2029,6 +1944,128 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Biometric success animation dialog ────────────────────────────────────────
+
+class _BiometricSuccessDialog extends StatefulWidget {
+  const _BiometricSuccessDialog();
+
+  @override
+  State<_BiometricSuccessDialog> createState() => _BiometricSuccessDialogState();
+}
+
+class _BiometricSuccessDialogState extends State<_BiometricSuccessDialog>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _checkAnim;
+  late final Animation<double> _pulseAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+    _checkAnim = CurvedAnimation(parent: _ctrl, curve: const Interval(0.0, 0.7, curve: Curves.easeOutBack));
+    _pulseAnim = CurvedAnimation(parent: _ctrl, curve: const Interval(0.6, 1.0, curve: Curves.easeOut));
+    _ctrl.forward();
+    // Auto-close after 2 seconds
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: 240,
+          padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 24),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 32,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedBuilder(
+                animation: _ctrl,
+                builder: (_, __) => Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Outer pulse ring
+                    Transform.scale(
+                      scale: 0.7 + 0.4 * _pulseAnim.value,
+                      child: Opacity(
+                        opacity: (1 - _pulseAnim.value).clamp(0.0, 1.0),
+                        child: Container(
+                          width: 96,
+                          height: 96,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.green.withOpacity(0.2),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Main circle
+                    Transform.scale(
+                      scale: _checkAnim.value,
+                      child: Container(
+                        width: 72,
+                        height: 72,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: [Color(0xFF43A047), Color(0xFF2E7D32)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                        ),
+                        child: const Icon(Icons.fingerprint, color: Colors.white, size: 38),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Биометрия включена',
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Вход по отпечатку пальца\nактивирован',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.text.withOpacity(0.6),
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
