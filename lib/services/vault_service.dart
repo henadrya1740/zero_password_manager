@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/api_service.dart';
 import '../utils/biometric_service.dart';
 import '../utils/memory_security.dart';
+import 'auth_token_storage.dart';
 import 'crypto_service.dart';
 import 'cache_service.dart';
 import '../config/app_config.dart';
@@ -187,11 +188,11 @@ class VaultService {
     lock();
 
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('token');
     await prefs.remove('pin_hash');
     await prefs.remove('pin_code');
     await prefs.remove(_saltKey);
 
+    await AuthTokenStorage.clearAccessToken();
     await _storage.delete(key: _storageKey);
     await _storage.deleteAll();
 
@@ -443,6 +444,21 @@ class VaultService {
     } finally {
       bytes.fillRange(0, bytes.length, 0);
       buffer.wipe();
+    }
+  }
+
+  Future<String> encryptAccountSeedPhrase(String phrase) async {
+    if (_masterKey == null) throw Exception('Vault is locked');
+    return _crypto.encrypt(_masterKey!, phrase.trim());
+  }
+
+  Future<SecureBuffer> decryptAccountSeedPhraseSecure(String encryptedB64) async {
+    if (_masterKey == null) throw Exception('Vault is locked');
+    final plaintextBytes = await _crypto.decryptToBytes(_masterKey!, encryptedB64);
+    try {
+      return SecureBuffer.fromBytes(plaintextBytes);
+    } finally {
+      plaintextBytes.fillRange(0, plaintextBytes.length, 0);
     }
   }
 }

@@ -10,6 +10,7 @@ import '../utils/api_service.dart';
 import '../utils/memory_security.dart';
 import '../utils/password_history_service.dart';
 import '../utils/folder_service.dart';
+import '../services/auth_token_storage.dart';
 import '../services/vault_service.dart';
 
 // ── helpers (same as add_password_screen) ────────────────────────────────────
@@ -277,8 +278,10 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token');
+      final token = await AuthTokenStorage.readAccessToken();
+      if (token == null || token.isEmpty) {
+        throw Exception('Missing access token');
+      }
 
       final passwordId = widget.password['id'];
 

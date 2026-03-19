@@ -15,6 +15,7 @@ import 'folders_screen.dart';
 import '../config/app_config.dart';
 import '../utils/folder_service.dart';
 import '../utils/hidden_folder_service.dart';
+import '../services/auth_token_storage.dart';
 import '../services/vault_service.dart';
 import '../utils/memory_security.dart';
 import 'password_detail_screen.dart';
@@ -281,8 +282,14 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token');
+      final token = await AuthTokenStorage.readAccessToken();
+      if (token == null || token.isEmpty) {
+        setState(() {
+          searchResults.clear();
+          isSearching = false;
+        });
+        return;
+      }
 
       final response = await http.get(
         Uri.parse(

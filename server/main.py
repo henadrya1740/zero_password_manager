@@ -161,8 +161,13 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 @app.websocket("/ws/device-events")
-async def websocket_device_events(websocket: WebSocket, token: str):
+async def websocket_device_events(websocket: WebSocket, token: Optional[str] = None):
     try:
+        auth_header = websocket.headers.get("authorization")
+        if (token is None or not token) and auth_header and auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+        if not token:
+            raise ValueError("Missing token")
         payload = auth_service.decode_token(token)
         user_id = int(payload.get("sub"))
     except Exception:
@@ -226,21 +231,23 @@ def get_seed_phrase(
     current_user: models.User = Depends(get_seed_access_user),
     db: Session = Depends(get_db)
 ):
-    """Retrieve the encrypted seed phrase. Requires specialized short-lived token."""
+    """Retrieve the client-encrypted seed phrase blob. Requires short-lived token."""
     if not current_user.seed_phrase_encrypted:
         raise HTTPException(status_code=404, detail="Seed phrase not set")
 
     # Access Log
     crud.audit_event(db, current_user.id, "seed_phrase_viewed")
     
-    # Decrypt with Server Key and return
-    decrypted = EncryptionService.decrypt(current_user.seed_phrase_encrypted)
-    
     # Update last viewed
     current_user.seed_phrase_last_viewed_at = datetime.now(timezone.utc)
     db.commit()
     
-    return {"seed_phrase": decrypted}
+    stored_value = current_user.seed_phrase_encrypted
+    if stored_value.startswith("client:"):
+        return {"seed_phrase_encrypted": stored_value.removeprefix("client:")}
+
+    legacy_plaintext = EncryptionService.decrypt(stored_value)
+    return {"seed_phrase": legacy_plaintext}
 
 
 @app.post("/profile/seed-phrase")
@@ -252,8 +259,9 @@ def set_seed_phrase(
     db: Session = Depends(get_db)
 ):
     """Set or rotate the seed phrase. Rotation requires multi-factor proof."""
+    encrypted_phrase = body.get("seed_phrase_encrypted")
     new_phrase = body.get("seed_phrase")
-    if not new_phrase:
+    if not encrypted_phrase and not new_phrase:
         raise HTTPException(status_code=400, detail="Seed phrase required")
 
     # If it's a rotation, we should ideally verify old phrase or password
@@ -263,7 +271,10 @@ def set_seed_phrase(
         verify_hardened_otp(db, current_user, otp)
 
     # Encrypt with Server Key
-    current_user.seed_phrase_encrypted = EncryptionService.encrypt(new_phrase)
+    if encrypted_phrase:
+        current_user.seed_phrase_encrypted = f"client:{encrypted_phrase}"
+    else:
+        current_user.seed_phrase_encrypted = EncryptionService.encrypt(new_phrase)
     db.commit()
     
     crud.audit_event(db, current_user.id, "seed_phrase_updated")

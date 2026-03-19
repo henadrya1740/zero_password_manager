@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:safe_device/safe_device.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:nk3_zero/screens/login_screen.dart';
@@ -12,6 +11,7 @@ import 'package:nk3_zero/screens/setup_pin_screen.dart';
 import '../config/app_config.dart';
 import '../utils/pin_security.dart';
 import '../utils/biometric_service.dart';
+import '../services/auth_token_storage.dart';
 import '../services/vault_service.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -58,8 +58,7 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _navigateNext() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('token');
+    final token = await AuthTokenStorage.readAccessToken();
     final hasPinHash = await PinSecurity.hasPinHash();
 
     if (!mounted) return;
