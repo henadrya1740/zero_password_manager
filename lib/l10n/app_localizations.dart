@@ -176,7 +176,6 @@ class AppLocalizations {
     'Никому не сообщайте эту фразу! Она дает полный доступ к вашему аккаунту и данным.': 'Do not share this phrase with anyone. It grants full access to your account and data.',
     'Для просмотра фразы восстановления введите TOTP код из приложения.': 'To view the recovery phrase, enter the TOTP code from your authenticator app.',
     'TOTP Код': 'TOTP code',
-    'Защита 2FA': '2FA protection',
     'Защита аккаунта': 'Account protection',
     'ПОДТВЕРДИТЬ': 'CONFIRM',
     'Войти с Passkey': 'Sign in with Passkey',
