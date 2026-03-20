@@ -7,14 +7,17 @@ import 'package:form_builder_validators/form_builder_validators.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import '../theme/colors.dart';
 import '../config/app_config.dart';
+import '../l10n/app_localizations.dart';
 import '../widgets/otp_input_dialog.dart';
 import '../services/auth_token_storage.dart';
+import '../services/language_service.dart';
 import '../utils/passkey_service.dart';
 import '../services/vault_service.dart';
 import '../models/server_error.dart';
 import '../utils/form_error_handler.dart';
 import '../utils/security_utils.dart';
 import '../utils/pin_security.dart';
+import '../l10n/l_text.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -64,7 +67,10 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     try {
       final response = await http.post(
         Uri.parse(AppConfig.loginUrl),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept-Language': LanguageService.instance.languageCode,
+        },
         body: json.encode({
           'login': login, 
           'password': password,
@@ -117,7 +123,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       debugPrint('Login error: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ошибка подключения к серверу')),
+        const SnackBar(content: LText('Ошибка подключения к серверу')),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -130,7 +136,10 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     try {
       final response = await http.post(
         Uri.parse(AppConfig.loginMfaUrl),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept-Language': LanguageService.instance.languageCode,
+        },
         body: json.encode({
           'mfa_token': mfaToken,
           'code': otp,
@@ -148,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ошибка OTP')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: LText('Ошибка OTP')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -200,12 +209,12 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         _playErrorShake();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Ошибка входа через Passkey')),
+            const SnackBar(content: LText('Ошибка входа через Passkey')),
           );
         }
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: LText('Ошибка: $e')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -244,7 +253,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                         name: 'login',
                         style: TextStyle(color: AppColors.text),
                         decoration: InputDecoration(
-                          hintText: 'Логин',
+                          hintText: AppLocalizations.translateStandalone('Логин'),
                           prefixIcon: Icon(Icons.person_outline, color: AppColors.button),
                           filled: true,
                           fillColor: AppColors.input,
@@ -254,7 +263,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                           ),
                         ),
                         validator: FormBuilderValidators.compose([
-                          FormBuilderValidators.required(errorText: 'Введите логин'),
+                          FormBuilderValidators.required(
+                            errorText: AppLocalizations.translateStandalone('Введите логин'),
+                          ),
                         ]),
                       ),
                       const SizedBox(height: 16),
@@ -264,7 +275,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                         obscureText: true,
                         style: TextStyle(color: AppColors.text),
                         decoration: InputDecoration(
-                          hintText: 'Пароль',
+                          hintText: AppLocalizations.translateStandalone('Пароль'),
                           prefixIcon: Icon(Icons.lock_outline, color: AppColors.button),
                           filled: true,
                           fillColor: AppColors.input,
@@ -273,7 +284,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             borderSide: BorderSide.none,
                           ),
                         ),
-                        validator: FormBuilderValidators.required(errorText: 'Введите пароль'),
+                        validator: FormBuilderValidators.required(
+                          errorText: AppLocalizations.translateStandalone('Введите пароль'),
+                        ),
                       ),
                       const SizedBox(height: 32),
 
@@ -306,7 +319,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                     ),
-                                    child: const Text(
+                                    child: const LText(
                                       'Войти',
                                       style: TextStyle(
                                         fontSize: 16,
@@ -320,7 +333,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                 OutlinedButton.icon(
                                   onPressed: _isLoading ? null : _loginWithPasskey,
                                   icon: const Icon(Icons.fingerprint),
-                                  label: const Text('Войти с Passkey'),
+                                  label: const LText('Войти с Passkey'),
                                   style: OutlinedButton.styleFrom(
                                     minimumSize: const Size(double.infinity, 56),
                                     shape: RoundedRectangleBorder(
@@ -336,14 +349,14 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       const SizedBox(height: 24),
                       TextButton(
                         onPressed: () => Navigator.pushNamed(context, '/reset-password'),
-                        child: Text(
+                        child: LText(
                           'Забыли пароль?',
                           style: TextStyle(color: AppColors.button.withOpacity(0.8)),
                         ),
                       ),
                       TextButton(
                         onPressed: () => Navigator.pushReplacementNamed(context, '/signup'),
-                        child: Text(
+                        child: LText(
                           'Нет аккаунта? Зарегистрироваться',
                           style: TextStyle(color: AppColors.button),
                         ),
@@ -390,7 +403,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           shaderCallback: (bounds) => LinearGradient(
             colors: [AppColors.button, AppColors.button.withOpacity(0.7)],
           ).createShader(bounds),
-          child: const Text(
+          child: const LText(
             'ZERO',
             style: TextStyle(
               fontSize: 48,
@@ -401,7 +414,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           ),
         ),
         const SizedBox(height: 8),
-        Text(
+        LText(
           'Защищенный вход в хранилище',
           style: TextStyle(
             fontSize: 16,

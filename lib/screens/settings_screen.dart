@@ -13,12 +13,14 @@ import 'package:nk3_zero/utils/api_service.dart';
 import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
 import '../services/auth_token_storage.dart';
+import '../services/language_service.dart';
 import '../services/vault_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:csv/csv.dart';
 import 'package:flutter/services.dart';
 import '../utils/hidden_folder_service.dart';
 import '../utils/memory_security.dart';
+import '../l10n/l_text.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -104,7 +106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Icon(Icons.shield_outlined, color: AppColors.button, size: 22),
             ),
             const SizedBox(width: 12),
-            Text(
+            LText(
               'Скрытые папки',
               style: TextStyle(color: AppColors.text, fontSize: 17, fontWeight: FontWeight.bold),
             ),
@@ -114,7 +116,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            LText(
               'Введите TOTP-код для отображения скрытых папок',
               style: TextStyle(color: AppColors.text.withOpacity(0.7), fontSize: 13),
             ),
@@ -154,7 +156,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Отмена', style: TextStyle(color: AppColors.text.withOpacity(0.6))),
+            child: LText('Отмена', style: TextStyle(color: AppColors.text.withOpacity(0.6))),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -166,7 +168,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               final ok = await HiddenFolderService.instance.verifyTotp(controller.text.trim());
               if (ctx.mounted) Navigator.pop(ctx, ok);
             },
-            child: const Text('Подтвердить'),
+            child: const LText('Подтвердить'),
           ),
         ],
       ),
@@ -182,7 +184,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               Icon(Icons.error_outline, color: Colors.white),
               SizedBox(width: 8),
-              Text('Неверный TOTP-код', style: TextStyle(color: Colors.white)),
+              LText('Неверный TOTP-код', style: TextStyle(color: Colors.white)),
             ],
           ),
         ),
@@ -216,23 +218,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder:
           (context) => AlertDialog(
             backgroundColor: AppColors.input,
-            title: Text(
+            title: LText(
               'Удалить PIN-код?',
               style: TextStyle(color: AppColors.text),
             ),
-            content: const Text(
+            content: const LText(
               'Вы уверены, что хотите удалить PIN-код? После этого для входа в приложение потребуется вводить логин и пароль.',
               style: TextStyle(color: Colors.grey),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Отмена'),
+                child: const LText('Отмена'),
               ),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(true),
                 style: TextButton.styleFrom(foregroundColor: Colors.red),
-                child: const Text('Удалить'),
+                child: const LText('Удалить'),
               ),
             ],
           ),
@@ -257,7 +259,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: Colors.green,
-              content: Text('PIN-код удален'),
+              content: LText('PIN-код удален'),
             ),
           );
         }
@@ -266,7 +268,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: Colors.red,
-              content: Text('Ошибка при удалении PIN-кода'),
+              content: LText('Ошибка при удалении PIN-кода'),
             ),
           );
         }
@@ -337,7 +339,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.green,
-            content: Text('Успешно импортировано ${entries.length} паролей'),
+            content: LText('Успешно импортировано ${entries.length} паролей'),
           ),
         );
       }
@@ -346,7 +348,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red,
-            content: Text('Ошибка импорта: ${e.toString()}'),
+            content: LText('Ошибка импорта: ${e.toString()}'),
           ),
         );
       }
@@ -361,23 +363,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder:
           (context) => AlertDialog(
             backgroundColor: AppColors.input,
-            title: Text(
+            title: LText(
               'Выйти из аккаунта?',
               style: TextStyle(color: AppColors.text),
             ),
-            content: const Text(
+            content: const LText(
               'Вы будете перенаправлены на экран входа.',
               style: TextStyle(color: Colors.grey),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Отмена'),
+                child: const LText('Отмена'),
               ),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(true),
                 style: TextButton.styleFrom(foregroundColor: Colors.red),
-                child: const Text('Выйти'),
+                child: const LText('Выйти'),
               ),
             ],
           ),
@@ -398,7 +400,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: Colors.red,
-              content: Text('Ошибка при выходе'),
+              content: LText('Ошибка при выходе'),
             ),
           );
         }
@@ -425,7 +427,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               backgroundColor: Colors.green,
-              content: Text('Обновлено фавиконок: ${data['updated'] ?? 0}'),
+              content: LText('Обновлено фавиконок: ${data['updated'] ?? 0}'),
             ),
           );
         }
@@ -434,7 +436,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: Colors.red,
-              content: Text('Ошибка при обновлении фавиконок'),
+              content: LText('Ошибка при обновлении фавиконок'),
             ),
           );
         }
@@ -444,7 +446,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: Colors.red,
-            content: Text('Ошибка подключения к серверу'),
+            content: LText('Ошибка подключения к серверу'),
           ),
         );
       }
@@ -464,7 +466,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.green,
-            content: Text(
+            content: LText(
               value
                   ? 'Записи с seed фразами скрыты'
                   : 'Записи с seed фразами отображаются',
@@ -477,7 +479,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: Colors.red,
-            content: Text('Ошибка при сохранении настроек'),
+            content: LText('Ошибка при сохранении настроек'),
           ),
         );
       }
@@ -529,7 +531,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: Colors.orange,
-              content: Text('Хранилище заблокировано. Войдите через PIN для включения биометрии.'),
+              content: LText('Хранилище заблокировано. Войдите через PIN для включения биометрии.'),
             ),
           );
         }
@@ -543,7 +545,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: Colors.orange,
-              content: Text(
+              content: LText(
                 'Отпечатки пальцев не настроены. Добавьте отпечаток в Настройках телефона → Безопасность.',
               ),
               duration: Duration(seconds: 5),
@@ -570,7 +572,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 backgroundColor: Colors.red,
-                content: Text('Не удалось сохранить ключ. Попробуйте снова.'),
+                content: LText('Не удалось сохранить ключ. Попробуйте снова.'),
               ),
             );
           }
@@ -580,7 +582,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: Colors.red,
-              content: Text('Ошибка при включении биометрической аутентификации'),
+              content: LText('Ошибка при включении биометрической аутентификации'),
             ),
           );
         }
@@ -592,23 +594,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
         builder:
             (context) => AlertDialog(
               backgroundColor: AppColors.input,
-              title: Text(
+              title: LText(
                 'Отключить $_biometricType?',
                 style: TextStyle(color: AppColors.text),
               ),
-              content: Text(
+              content: LText(
                 'Вы уверены, что хотите отключить $_biometricType? После этого для входа потребуется вводить PIN-код или логин и пароль.',
                 style: const TextStyle(color: Colors.grey),
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Отмена'),
+                  child: const LText('Отмена'),
                 ),
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(true),
                   style: TextButton.styleFrom(foregroundColor: Colors.red),
-                  child: const Text('Отключить'),
+                  child: const LText('Отключить'),
                 ),
               ],
             ),
@@ -625,7 +627,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 backgroundColor: Colors.green,
-                content: Text('$_biometricType отключен'),
+                content: LText('$_biometricType отключен'),
               ),
             );
           }
@@ -634,7 +636,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 backgroundColor: Colors.red,
-                content: Text(
+                content: LText(
                   'Ошибка при отключении биометрической аутентификации',
                 ),
               ),
@@ -655,7 +657,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           builder:
               (context) => AlertDialog(
                 backgroundColor: AppColors.input,
-                title: Text(
+                title: LText(
                   'Диагностика биометрии',
                   style: TextStyle(color: AppColors.text),
                 ),
@@ -695,7 +697,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   as Map<String, String>)
                               .isNotEmpty) ...[
                         const SizedBox(height: 12),
-                        Text(
+                        LText(
                           'Доступные методы:',
                           style: TextStyle(
                             color: AppColors.text,
@@ -713,7 +715,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   left: 16,
                                   bottom: 4,
                                 ),
-                                child: Text(
+                                child: LText(
                                   '• ${entry.value}',
                                   style: const TextStyle(
                                     color: Colors.grey,
@@ -728,7 +730,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           (diagnosticInfo['availableBiometrics'] as List)
                               .isNotEmpty) ...[
                         const SizedBox(height: 12),
-                        Text(
+                        LText(
                           'Технические названия:',
                           style: TextStyle(
                             color: AppColors.text,
@@ -740,7 +742,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ...(diagnosticInfo['availableBiometrics'] as List).map(
                           (biometric) => Padding(
                             padding: const EdgeInsets.only(left: 16, bottom: 4),
-                            child: Text(
+                            child: LText(
                               '• $biometric',
                               style: const TextStyle(
                                 color: Colors.grey,
@@ -763,7 +765,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               color: Colors.red.withOpacity(0.3),
                             ),
                           ),
-                          child: Text(
+                          child: LText(
                             'Ошибка: ${diagnosticInfo['error']}',
                             style: const TextStyle(
                               color: Colors.red,
@@ -778,7 +780,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Закрыть'),
+                    child: const LText('Закрыть'),
                   ),
                   if (diagnosticInfo['canUseBiometrics'] == true &&
                       diagnosticInfo['isEnabled'] == false)
@@ -787,7 +789,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Navigator.of(context).pop();
                         await _forceEnableBiometrics();
                       },
-                      child: const Text('Принудительно включить'),
+                      child: const LText('Принудительно включить'),
                     ),
                   TextButton(
                     onPressed: () async {
@@ -795,7 +797,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       await _resetBiometricSettings();
                     },
                     style: TextButton.styleFrom(foregroundColor: Colors.orange),
-                    child: const Text('Сбросить настройки'),
+                    child: const LText('Сбросить настройки'),
                   ),
                 ],
               ),
@@ -806,7 +808,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red,
-            content: Text('Ошибка при получении диагностики: $e'),
+            content: LText('Ошибка при получении диагностики: $e'),
           ),
         );
       }
@@ -821,7 +823,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           SizedBox(
             width: 140,
-            child: Text(
+            child: LText(
               label,
               style: TextStyle(
                 color: AppColors.text,
@@ -831,7 +833,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           Expanded(
-            child: Text(
+            child: LText(
               value,
               style: TextStyle(
                 color:
@@ -866,7 +868,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: Colors.green,
-              content: Text(
+              content: LText(
                 'Биометрическая аутентификация принудительно включена',
               ),
             ),
@@ -877,7 +879,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: Colors.red,
-              content: Text(
+              content: LText(
                 'Не удалось включить биометрическую аутентификацию',
               ),
             ),
@@ -889,7 +891,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red,
-            content: Text('Ошибка при включении биометрии: $e'),
+            content: LText('Ошибка при включении биометрии: $e'),
           ),
         );
       }
@@ -908,7 +910,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: Colors.orange,
-            content: Text('Настройки биометрии сброшены'),
+            content: LText('Настройки биометрии сброшены'),
           ),
         );
       }
@@ -917,7 +919,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red,
-            content: Text('Ошибка при сбросе настроек: $e'),
+            content: LText('Ошибка при сбросе настроек: $e'),
           ),
         );
       }
@@ -948,7 +950,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder:
           (context) => AlertDialog(
             backgroundColor: AppColors.input,
-            title: Text(
+            title: LText(
               'Выберите тему',
               style: TextStyle(color: AppColors.text),
             ),
@@ -957,11 +959,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children:
                   AppTheme.values.map((theme) {
                     return RadioListTile<AppTheme>(
-                      title: Text(
+                      title: LText(
                         ThemeManager.getThemeName(theme),
                         style: TextStyle(color: AppColors.text),
                       ),
-                      subtitle: Text(
+                      subtitle: LText(
                         _getThemeDescription(theme),
                         style: const TextStyle(
                           color: Colors.grey,
@@ -978,7 +980,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Отмена'),
+                child: const LText('Отмена'),
               ),
             ],
           ),
@@ -999,7 +1001,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               backgroundColor: Colors.green,
-              content: Text(
+              content: LText(
                 'Тема изменена на ${ThemeManager.getThemeName(selectedTheme)}',
               ),
             ),
@@ -1010,12 +1012,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: Colors.red,
-              content: Text('Ошибка при сохранении темы'),
+              content: LText('Ошибка при сохранении темы'),
             ),
           );
         }
       }
     }
+  }
+
+  Future<void> _changeLanguage() async {
+    final currentCode = LanguageService.instance.languageCode;
+    final selectedCode = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.input,
+        title: const LText('Язык', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            RadioListTile<String>(
+              value: 'ru',
+              groupValue: currentCode,
+              title: const LText('Русский', style: TextStyle(color: Colors.white)),
+              onChanged: (value) => Navigator.pop(context, value),
+              activeColor: AppColors.button,
+            ),
+            RadioListTile<String>(
+              value: 'en',
+              groupValue: currentCode,
+              title: const LText('English', style: TextStyle(color: Colors.white)),
+              onChanged: (value) => Navigator.pop(context, value),
+              activeColor: AppColors.button,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: LText('Отмена', style: TextStyle(color: AppColors.text.withOpacity(0.6))),
+          ),
+        ],
+      ),
+    );
+
+    if (selectedCode == null || selectedCode == currentCode) return;
+
+    await LanguageService.instance.setLanguageCode(selectedCode);
+    if (!mounted) return;
+    setState(() {});
   }
 
   String _getThemeDescription(AppTheme theme) {
@@ -1058,14 +1102,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder:
           (context) => AlertDialog(
             backgroundColor: AppColors.input,
-            title: const Text(
+            title: const LText(
               'Привязка Telegram',
               style: TextStyle(color: Colors.white),
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
+                const LText(
                   'Введите ваш Telegram Chat ID для получения уведомлений о безопасности.',
                   style: TextStyle(color: Colors.grey, fontSize: 13),
                 ),
@@ -1087,11 +1131,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('Отмена'),
+                child: const LText('Отмена'),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context, controller.text),
-                child: const Text('Сохранить'),
+                child: const LText('Сохранить'),
               ),
             ],
           ),
@@ -1113,7 +1157,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 backgroundColor: Colors.green,
-                content: Text('Настройки Telegram сохранены'),
+                content: LText('Настройки Telegram сохранены'),
               ),
             );
           }
@@ -1124,7 +1168,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 backgroundColor: Colors.red,
-                content: Text('Ошибка при сохранении настроек'),
+                content: LText('Ошибка при сохранении настроек'),
               ),
             );
           }
@@ -1132,7 +1176,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(backgroundColor: Colors.red, content: Text('Ошибка: $e')),
+            SnackBar(backgroundColor: Colors.red, content: LText('Ошибка: $e')),
           );
         }
       } finally {
@@ -1165,14 +1209,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (success) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Passkey успешно зарегистрирован')),
+            const SnackBar(content: LText('Passkey успешно зарегистрирован')),
           );
         }
         _loadDevices();
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Ошибка регистрации Passkey')),
+            const SnackBar(content: LText('Ошибка регистрации Passkey')),
           );
         }
       }
@@ -1180,7 +1224,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+        ).showSnackBar(SnackBar(content: LText('Ошибка: $e')));
       }
     } finally {
       setState(() => _isPasskeyLoading = false);
@@ -1203,7 +1247,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Настройки'),
+        title: const LText('Настройки'),
         backgroundColor: AppColors.background,
         elevation: 0,
       ),
@@ -1231,20 +1275,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               children: [
                                 TextButton(
                                   onPressed: _changePinCode,
-                                  child: const Text('Изменить'),
+                                  child: const LText('Изменить'),
                                 ),
                                 TextButton(
                                   onPressed: _removePinCode,
                                   style: TextButton.styleFrom(
                                     foregroundColor: Colors.red,
                                   ),
-                                  child: const Text('Удалить'),
+                                  child: const LText('Удалить'),
                                 ),
                               ],
                             )
                             : TextButton(
                               onPressed: _changePinCode,
-                              child: const Text('Установить'),
+                              child: const LText('Установить'),
                             ),
                   ),
 
@@ -1366,7 +1410,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
+                              LText(
                                 'Показывать скрытые папки',
                                 style: TextStyle(
                                   color: AppColors.text,
@@ -1375,7 +1419,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                               ),
                               const SizedBox(height: 3),
-                              Text(
+                              LText(
                                 _showHiddenFolders
                                     ? 'Разблокировано на эту сессию'
                                     : 'Требуется TOTP для включения',
@@ -1423,6 +1467,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onTap: _changeTheme,
                   ),
 
+                  _buildSettingTile(
+                    icon: Icons.language,
+                    title: 'Язык',
+                    subtitle: LanguageService.instance.isRussian ? 'Русский' : 'English',
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: _changeLanguage,
+                  ),
+
                   const SizedBox(height: 24),
 
                   // Секция сервера
@@ -1434,7 +1486,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     trailing: TextButton(
                       onPressed:
                           () => Navigator.pushNamed(context, '/setup-server'),
-                      child: const Text('Изменить'),
+                      child: const LText('Изменить'),
                     ),
                   ),
 
@@ -1518,14 +1570,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       color: Colors.grey,
                                       size: 20,
                                     ),
-                                    title: Text(
+                                    title: LText(
                                       device['device_name'],
                                       style: const TextStyle(
                                         color: Colors.white,
                                         fontSize: 14,
                                       ),
                                     ),
-                                    subtitle: Text(
+                                    subtitle: LText(
                                       'Последний вход: ${device['last_used_at'] != null ? DateTime.parse(device['last_used_at']).toLocal().toString().split('.')[0] : "никогда"}',
                                       style: const TextStyle(
                                         color: Colors.grey,
@@ -1613,7 +1665,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ),
                         children: const [
-                          Text('Безопасное хранение и управление паролями.'),
+                          LText('Безопасное хранение и управление паролями.'),
                         ],
                       );
                     },
@@ -1631,7 +1683,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildSectionHeader(String title) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Text(
+      child: LText(
         title,
         style: TextStyle(
           fontSize: 16,
@@ -1655,11 +1707,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ListTile(
         leading: Icon(icon, color: AppColors.button),
-        title: Text(
+        title: LText(
           title,
           style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w500),
         ),
-        subtitle: Text(subtitle, style: const TextStyle(color: Colors.grey)),
+        subtitle: LText(subtitle, style: const TextStyle(color: Colors.grey)),
         trailing: trailing,
         onTap: onTap,
       ),
@@ -1673,11 +1725,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         context: context,
         builder: (context) => AlertDialog(
           backgroundColor: AppColors.input,
-          title: const Text('Безопасность', style: TextStyle(color: Colors.white)),
+          title: const LText('Безопасность', style: TextStyle(color: Colors.white)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
+              const LText(
                 'Для просмотра фразы восстановления введите TOTP код из приложения.',
                 style: TextStyle(color: Colors.grey, fontSize: 13),
               ),
@@ -1695,10 +1747,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
+            TextButton(onPressed: () => Navigator.pop(context), child: const LText('Отмена')),
             TextButton(
               onPressed: () => Navigator.pop(context, totpController.text.trim()),
-              child: const Text('Подтвердить'),
+              child: const LText('Подтвердить'),
             ),
           ],
         ),
@@ -1776,16 +1828,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.input,
-        title: const Text('Создать фразу восстановления?', style: TextStyle(color: Colors.white)),
-        content: const Text(
+        title: const LText('Создать фразу восстановления?', style: TextStyle(color: Colors.white)),
+        content: const LText(
           'Это позволит восстановить доступ к аккаунту при потере пароля. Фраза будет сгенерирована на устройстве.',
           style: TextStyle(color: Colors.grey),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Отмена')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const LText('Отмена')),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Продолжить'),
+            child: const LText('Продолжить'),
           ),
         ],
       ),
@@ -1810,7 +1862,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (!mounted) return;
         await _showSeedPhraseDialog(phrase);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(backgroundColor: Colors.green, content: Text('Фраза восстановления успешно создана')),
+          const SnackBar(backgroundColor: Colors.green, content: LText('Фраза восстановления успешно создана')),
         );
       } else {
         _showError('Ошибка при создании фразы');
@@ -1830,7 +1882,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.input,
-        title: const Text('Фраза восстановления', style: TextStyle(color: Colors.white)),
+        title: const LText('Фраза восстановления', style: TextStyle(color: Colors.white)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1840,7 +1892,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 color: Colors.black.withOpacity(0.3),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: SelectableText(
+              child: LSelectableText(
                 phrase,
                 style: const TextStyle(
                   color: Colors.white,
@@ -1852,7 +1904,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            const LText(
               'Никому не сообщайте эту фразу! Она дает полный доступ к вашему аккаунту и данным.',
               style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
               textAlign: TextAlign.center,
@@ -1862,17 +1914,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Закрыть'),
+            child: const LText('Закрыть'),
           ),
           ElevatedButton(
             onPressed: () async {
               await copyWithAutoClear(phrase);
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Фраза скопирована в буфер обмена')),
+                const SnackBar(content: LText('Фраза скопирована в буфер обмена')),
               );
             },
-            child: const Text('Копировать'),
+            child: const LText('Копировать'),
           ),
         ],
       ),
@@ -1882,7 +1934,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.red),
+      SnackBar(content: LText(msg), backgroundColor: Colors.red),
     );
   }
 
@@ -1938,11 +1990,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Row(
                   children: [
-                    const Text(
+                    const LText(
                       'Создано ',
                       style: TextStyle(color: Colors.grey, fontSize: 14),
                     ),
-                    const Text(
+                    const LText(
                       'NK_TRIPLLE',
                       style: TextStyle(
                         color: Colors.white,
@@ -1953,12 +2005,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: const Text('❤️', style: TextStyle(fontSize: 16)),
+                      child: const LText('❤️', style: TextStyle(fontSize: 16)),
                     ),
                   ],
                 ),
                 const SizedBox(height: 4),
-                Text(
+                LText(
                   'С любовью к безопасности и удобству',
                   style: TextStyle(
                     color: Colors.grey.withOpacity(0.8),
@@ -2072,7 +2124,7 @@ class _BiometricSuccessDialogState extends State<_BiometricSuccessDialog>
                 ),
               ),
               const SizedBox(height: 20),
-              Text(
+              LText(
                 'Биометрия включена',
                 style: TextStyle(
                   color: AppColors.text,
@@ -2081,7 +2133,7 @@ class _BiometricSuccessDialogState extends State<_BiometricSuccessDialog>
                 ),
               ),
               const SizedBox(height: 8),
-              Text(
+              LText(
                 'Вход по отпечатку пальца\nактивирован',
                 textAlign: TextAlign.center,
                 style: TextStyle(

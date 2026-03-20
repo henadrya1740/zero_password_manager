@@ -12,6 +12,7 @@ import '../utils/password_history_service.dart';
 import '../utils/folder_service.dart';
 import '../services/auth_token_storage.dart';
 import '../services/vault_service.dart';
+import '../l10n/l_text.dart';
 
 // ── helpers (same as add_password_screen) ────────────────────────────────────
 
@@ -247,21 +248,21 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            content: Text(
+            content: LText(
               'Вы уверены, что хотите удалить этот пароль?',
               style: TextStyle(color: AppColors.text.withOpacity(0.8)),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: Text(
+                child: LText(
                   'Отмена',
                   style: TextStyle(color: AppColors.text.withOpacity(0.6)),
                 ),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context, true),
-                child: Text(
+                child: LText(
                   'Удалить',
                   style: TextStyle(color: AppColors.error),
                 ),
@@ -410,7 +411,7 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
                     size: 20,
                   ),
                 ),
-                title: Text(
+                title: LText(
                   'Без папки',
                   style: TextStyle(color: AppColors.text),
                 ),
@@ -442,7 +443,7 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
                     ),
                     child: Icon(icon, color: color, size: 20),
                   ),
-                  title: Text(
+                  title: LText(
                     folder['name'] as String? ?? '',
                     style: TextStyle(color: AppColors.text),
                   ),
@@ -660,7 +661,7 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
                               ),
                               const SizedBox(width: 12),
                               Expanded(
-                                child: Text(
+                                child: LText(
                                   selectedFolder['name'] as String? ?? '',
                                   style: TextStyle(
                                     color: AppColors.text,
@@ -676,7 +677,7 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
                               ),
                               const SizedBox(width: 12),
                               Expanded(
-                                child: Text(
+                                child: LText(
                                   'Выбрать папку (необязательно)',
                                   style: TextStyle(
                                     color: AppColors.text.withOpacity(0.6),
@@ -754,7 +755,7 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: Colors.red.withOpacity(0.3)),
                     ),
-                    child: Text(
+                    child: LText(
                       errorMessage!,
                       style: const TextStyle(color: Colors.red),
                     ),
@@ -765,7 +766,7 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
                     : ThemedElevatedButton(
                       onPressed: savePassword,
                       minimumSize: const Size.fromHeight(50),
-                      child: const Text('Сохранить'),
+                      child: const LText('Сохранить'),
                     ),
                 SizedBox(height: MediaQuery.of(context).padding.bottom + 32),
               ],

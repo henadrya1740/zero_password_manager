@@ -20,6 +20,7 @@ import '../services/vault_service.dart';
 import '../utils/memory_security.dart';
 import 'password_detail_screen.dart';
 import 'sharing_screen.dart';
+import '../l10n/l_text.dart';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -246,7 +247,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.green,
-            content: Text('Успешно импортировано ${entries.length} паролей'),
+            content: LText('Успешно импортировано ${entries.length} паролей'),
           ),
         );
         _loadPasswords();
@@ -256,7 +257,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red,
-            content: Text('Ошибка импорта: ${e.toString()}'),
+            content: LText('Ошибка импорта: ${e.toString()}'),
           ),
         );
       }
@@ -382,7 +383,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
               children: [
                 Icon(Icons.check_circle, color: Colors.white),
                 SizedBox(width: 10),
-                Text('Скопировано (авто-очистка через 30с)',
+                LText('Скопировано (авто-очистка через 30с)',
                     style: TextStyle(color: Colors.white)),
               ],
             ),
@@ -394,7 +395,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: Colors.red,
-            content: Text('Ошибка дешифрования'),
+            content: LText('Ошибка дешифрования'),
           ),
         );
       }
@@ -678,7 +679,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
               style: const TextStyle(fontSize: 18),
             ),
             const SizedBox(height: 8),
-            Text(
+            LText(
               'Попробуйте изменить запрос',
               style: TextStyle(
                 fontSize: 14,
@@ -816,7 +817,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                                       : AppColors.text.withOpacity(0.5),
                                 ),
                                 const SizedBox(width: 6),
-                                Text(
+                                LText(
                                   item['name'] as String? ?? '',
                                   style: TextStyle(
                                     fontSize: 13,
@@ -838,7 +839,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                                         : AppColors.text.withOpacity(0.07),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: Text(
+                                  child: LText(
                                     '$count',
                                     style: TextStyle(
                                       fontSize: 10,
@@ -892,7 +893,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: AppColors.input,
-          content: Text(
+          content: LText(
             'Создайте папку сначала',
             style: TextStyle(color: AppColors.text),
           ),
@@ -999,7 +1000,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                           _showFolderDialog();
                         },
                         icon: Icon(Icons.add, color: AppColors.button),
-                        label: Text(
+                        label: LText(
                           'Создать новую папку',
                           style: TextStyle(color: AppColors.button),
                         ),
@@ -1051,7 +1052,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
             children: [
               const Icon(Icons.check_circle, color: Colors.white, size: 18),
               const SizedBox(width: 8),
-              Text(
+              LText(
                 folderId == null ? 'Удалено из папки' : 'Перемещено в папку',
                 style: const TextStyle(color: Colors.white),
               ),
@@ -1138,12 +1139,12 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Скрытая папка',
+                                LText('Скрытая папка',
                                     style: TextStyle(
                                         color: AppColors.text,
                                         fontWeight: FontWeight.w600,
                                         fontSize: 14)),
-                                Text('Требует TOTP для просмотра',
+                                LText('Требует TOTP для просмотра',
                                     style: TextStyle(
                                         color: AppColors.text.withOpacity(0.5),
                                         fontSize: 11)),
@@ -1160,7 +1161,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  Text(
+                  LText(
                     'Цвет',
                     style: TextStyle(
                       color: AppColors.text.withOpacity(0.7),
@@ -1194,7 +1195,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                     }).toList(),
                   ),
                   const SizedBox(height: 20),
-                  Text(
+                  LText(
                     'Иконка',
                     style: TextStyle(
                       color: AppColors.text.withOpacity(0.7),
@@ -1236,7 +1237,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: Text('Отмена', style: TextStyle(color: AppColors.text.withOpacity(0.6))),
+                child: LText('Отмена', style: TextStyle(color: AppColors.text.withOpacity(0.6))),
               ),
               ThemedButton(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -1262,7 +1263,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                   }
                   if (ctx.mounted) Navigator.pop(ctx, true);
                 },
-                child: Text(
+                child: LText(
                   existing == null ? 'Создать' : 'Сохранить',
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                 ),
@@ -1302,7 +1303,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
             const SizedBox(height: 16),
             ListTile(
               leading: Icon(Icons.edit, color: AppColors.button),
-              title: Text('Редактировать', style: TextStyle(color: AppColors.text)),
+              title: LText('Редактировать', style: TextStyle(color: AppColors.text)),
               onTap: () {
                 Navigator.pop(ctx);
                 _showFolderDialog(existing: folder);
@@ -1310,7 +1311,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
             ),
             ListTile(
               leading: Icon(Icons.delete_outline, color: AppColors.error),
-              title: Text('Удалить папку', style: TextStyle(color: AppColors.error)),
+              title: LText('Удалить папку', style: TextStyle(color: AppColors.error)),
               onTap: () {
                 Navigator.pop(ctx);
                 _deleteFolder(folder);
@@ -1329,18 +1330,18 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: NeonText(text: 'Удалить папку?', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        content: Text(
+        content: LText(
           'Папка «${folder['name']}» будет удалена.\nПароли из этой папки останутся в общем списке.',
           style: TextStyle(color: AppColors.text.withOpacity(0.8)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Отмена', style: TextStyle(color: AppColors.text.withOpacity(0.6))),
+            child: LText('Отмена', style: TextStyle(color: AppColors.text.withOpacity(0.6))),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Удалить', style: TextStyle(color: AppColors.error)),
+            child: LText('Удалить', style: TextStyle(color: AppColors.error)),
           ),
         ],
       ),
@@ -1420,7 +1421,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        LText(
                           item['title'] ?? '',
                           style: TextStyle(
                             color: AppColors.text,
@@ -1430,7 +1431,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        Text(
+                        LText(
                           item['subtitle'] ?? '',
                           style: TextStyle(
                             color: AppColors.text.withOpacity(0.6),
@@ -1456,9 +1457,9 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                 child: Icon(Icons.drive_file_move_outline,
                     color: AppColors.button, size: 18),
               ),
-              title: Text('Переместить в папку',
+              title: LText('Переместить в папку',
                   style: TextStyle(color: AppColors.text, fontSize: 15)),
-              subtitle: Text(
+              subtitle: LText(
                 item['folder_id'] != null ? 'Изменить папку' : 'Добавить в папку',
                 style: TextStyle(color: AppColors.text.withOpacity(0.5), fontSize: 12),
               ),
@@ -1476,7 +1477,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                 ),
                 child: const Icon(Icons.share, color: Colors.blue, size: 18),
               ),
-              title: Text('Поделиться паролем',
+              title: LText('Поделиться паролем',
                   style: TextStyle(color: AppColors.text, fontSize: 15)),
               onTap: () {
                 Navigator.pop(ctx);
@@ -1493,7 +1494,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                 child: const Icon(Icons.edit_outlined,
                     color: Colors.orange, size: 18),
               ),
-              title: Text('Редактировать',
+              title: LText('Редактировать',
                   style: TextStyle(color: AppColors.text, fontSize: 15)),
               onTap: () {
                 Navigator.pop(ctx);
@@ -1510,7 +1511,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                 child: const Icon(Icons.copy_outlined,
                     color: Colors.green, size: 18),
               ),
-              title: Text('Скопировать пароль',
+              title: LText('Скопировать пароль',
                   style: TextStyle(color: AppColors.text, fontSize: 15)),
               onTap: () {
                 Navigator.pop(ctx);
@@ -1549,7 +1550,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                 style: const TextStyle(fontSize: 16),
               ),
               const SizedBox(height: 8),
-              Text(
+              LText(
                 'Отключите скрытие в настройках, чтобы увидеть записи',
                 style: TextStyle(
                   fontSize: 14,
@@ -1674,7 +1675,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                             item['subtitle'].toString().isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(top: 4),
-                            child: Text(
+                            child: LText(
                               item['subtitle'],
                               style: TextStyle(
                                 fontSize: 14,
@@ -1699,7 +1700,7 @@ class _PasswordsScreenState extends State<PasswordsScreen> with RouteAware {
                                   ),
                                 ),
                                 const SizedBox(width: 4),
-                                Text(
+                                LText(
                                   itemFolder['name'] as String? ?? '',
                                   style: TextStyle(
                                     fontSize: 11,
@@ -1831,7 +1832,7 @@ class _FolderMoveItem extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  LText(
                     label,
                     style: TextStyle(
                       color: AppColors.text,
@@ -1840,7 +1841,7 @@ class _FolderMoveItem extends StatelessWidget {
                     ),
                   ),
                   if (sublabel != null)
-                    Text(
+                    LText(
                       sublabel!,
                       style: TextStyle(
                         color: AppColors.text.withOpacity(0.5),

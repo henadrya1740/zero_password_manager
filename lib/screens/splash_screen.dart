@@ -13,6 +13,7 @@ import '../utils/pin_security.dart';
 import '../utils/biometric_service.dart';
 import '../services/auth_token_storage.dart';
 import '../services/vault_service.dart';
+import '../l10n/l_text.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -114,7 +115,7 @@ class _SplashScreenState extends State<SplashScreen> {
               children: [
                 const Icon(Icons.gpp_bad_rounded, color: Colors.red, size: 80),
                 const SizedBox(height: 24),
-                Text(
+                LText(
                   'Устройство небезопасно',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         color: Colors.red,
@@ -123,7 +124,7 @@ class _SplashScreenState extends State<SplashScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),
-                Text(
+                LText(
                   'Обнаружены root-права или модификация системы. В целях защиты ваших паролей приложение заблокировано.',
                   style: Theme.of(context).textTheme.bodyMedium,
                   textAlign: TextAlign.center,
@@ -132,7 +133,7 @@ class _SplashScreenState extends State<SplashScreen> {
                 ElevatedButton(
                   onPressed: () => SystemNavigator.pop(),
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                  child: const Text('Закрыть приложение', style: TextStyle(color: Colors.white)),
+                  child: const LText('Закрыть приложение', style: TextStyle(color: Colors.white)),
                 ),
               ],
             ),

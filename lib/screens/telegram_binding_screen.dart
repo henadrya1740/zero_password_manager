@@ -6,6 +6,7 @@ import '../config/app_config.dart';
 import '../services/auth_token_storage.dart';
 import '../utils/api_service.dart';
 import '../widgets/otp_input_dialog.dart';
+import '../l10n/l_text.dart';
 
 class TelegramBindingScreen extends StatefulWidget {
   const TelegramBindingScreen({super.key});
@@ -95,7 +96,7 @@ class _TelegramBindingScreenState extends State<TelegramBindingScreen> {
 
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Telegram успешно привязан')),
+          const SnackBar(content: LText('Telegram успешно привязан')),
         );
         Navigator.pop(context);
       } else {
@@ -144,7 +145,7 @@ class _TelegramBindingScreenState extends State<TelegramBindingScreen> {
                               color: AppColors.button,
                             ),
                             const SizedBox(height: 16),
-                            const Text(
+                            const LText(
                               'Получайте уведомления о безопасности!',
                               textAlign: TextAlign.center,
                               style: TextStyle(
@@ -154,7 +155,7 @@ class _TelegramBindingScreenState extends State<TelegramBindingScreen> {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            Text(
+                            LText(
                               'Мы будем присылать оповещения о входе, изменении паролей и попытках взлома в ваш Telegram.',
                               textAlign: TextAlign.center,
                               style: TextStyle(color: Colors.grey[400]),
@@ -178,7 +179,7 @@ class _TelegramBindingScreenState extends State<TelegramBindingScreen> {
                         prefixIcon: const Icon(Icons.send, color: Colors.blue),
                       ),
                       const SizedBox(height: 12),
-                      Text(
+                      LText(
                         'Узнать свой ID можно через бота @userinfobot или аналогичные.',
                         style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                       ),
@@ -186,7 +187,7 @@ class _TelegramBindingScreenState extends State<TelegramBindingScreen> {
                       if (_errorMessage != null)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 16),
-                          child: Text(
+                          child: LText(
                             _errorMessage!,
                             style: const TextStyle(color: Colors.red),
                           ),
@@ -194,7 +195,7 @@ class _TelegramBindingScreenState extends State<TelegramBindingScreen> {
                       ThemedElevatedButton(
                         onPressed: _isLoading ? null : _saveBinding,
                         minimumSize: const Size.fromHeight(56),
-                        child: const Text('Привязать Telegram'),
+                        child: const LText('Привязать Telegram'),
                       ),
                     ],
                   ),

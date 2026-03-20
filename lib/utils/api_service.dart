@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../main.dart'; // Для navigatorKey
 import '../services/auth_token_storage.dart';
+import '../services/language_service.dart';
 import '../widgets/otp_input_dialog.dart';
 
 class ApiService {
@@ -10,6 +11,7 @@ class ApiService {
     final token = await AuthTokenStorage.readAccessToken();
     return {
       'Content-Type': 'application/json',
+      'Accept-Language': LanguageService.instance.languageCode,
       if (token != null) 'Authorization': 'Bearer $token',
     };
   }

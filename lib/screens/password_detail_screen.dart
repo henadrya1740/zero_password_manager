@@ -5,6 +5,7 @@ import '../widgets/themed_widgets.dart';
 import '../utils/memory_security.dart';
 import '../services/vault_service.dart';
 import 'edit_password_screen.dart';
+import '../l10n/l_text.dart';
 
 /// Shows the detail of a single password account.
 /// Sensitive fields are decrypted only on demand and wiped again when hidden.
@@ -337,7 +338,7 @@ class _PasswordDetailScreenState extends State<PasswordDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
+                  LText(
                     login.isNotEmpty ? login : 'Логин не указан',
                     style: TextStyle(
                       color: AppColors.text.withOpacity(0.6),
@@ -370,7 +371,7 @@ class _PasswordDetailScreenState extends State<PasswordDetailScreen> {
               children: [
                 Icon(Icons.lock_outline, size: 15, color: AppColors.button.withOpacity(0.8)),
                 const SizedBox(width: 6),
-                Text(
+                LText(
                   'Пароль',
                   style: TextStyle(
                     color: AppColors.text.withOpacity(0.7),
@@ -387,7 +388,7 @@ class _PasswordDetailScreenState extends State<PasswordDetailScreen> {
                 Expanded(
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 250),
-                    child: Text(
+                    child: LText(
                       _showPwd ? _pwdDisplay : '•' * (_pwdDisplay.isEmpty ? 12 : _pwdDisplay.length.clamp(8, 24)),
                       key: ValueKey(_showPwd),
                       style: TextStyle(
@@ -456,7 +457,7 @@ class _PasswordDetailScreenState extends State<PasswordDetailScreen> {
                         : AppColors.button.withOpacity(0.8),
                   ),
                   const SizedBox(width: 6),
-                  Text(
+                  LText(
                     label,
                     style: TextStyle(
                       color: AppColors.text.withOpacity(0.7),
@@ -477,7 +478,7 @@ class _PasswordDetailScreenState extends State<PasswordDetailScreen> {
           if (revealed)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: SelectableText(
+              child: LSelectableText(
                 content,
                 style: TextStyle(
                   color: highValue ? AppColors.error : AppColors.text,
@@ -512,7 +513,7 @@ class _FlagChip extends StatelessWidget {
         children: [
           Icon(icon, size: 13, color: AppColors.button),
           const SizedBox(width: 5),
-          Text(label, style: TextStyle(color: AppColors.button, fontSize: 12, fontWeight: FontWeight.w600)),
+          LText(label, style: TextStyle(color: AppColors.button, fontSize: 12, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -536,7 +537,7 @@ class _ErrorBanner extends StatelessWidget {
         children: [
           Icon(Icons.error_outline, color: AppColors.error, size: 18),
           const SizedBox(width: 8),
-          Expanded(child: Text(message, style: TextStyle(color: AppColors.error, fontSize: 13))),
+          Expanded(child: LText(message, style: TextStyle(color: AppColors.error, fontSize: 13))),
         ],
       ),
     );
