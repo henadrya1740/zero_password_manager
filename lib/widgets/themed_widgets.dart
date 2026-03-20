@@ -451,9 +451,6 @@ class ThemedElevatedButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ThemeManager.colors;
-    final localizedHint = hintText == null
-        ? null
-        : AppLocalizations.translate(hintText!, Localizations.localeOf(context));
 
     if (theme.hasGlassEffect) {
       return ClipRRect(
